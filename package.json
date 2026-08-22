@@ -1,0 +1,9 @@
+{
+  "name": "my-app",
+  "version": "1.0.0",
+  "description": "My social web app",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
