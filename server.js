@@ -1,39 +1,3 @@
-const http = require("http");
-
-const port = process.env.PORT || 10000;
-
-const server = http.createServer((req, res) => {
-  res.writeHead(200, {
-    "Content-Type": "text/html; charset=utf-8"
-  });
-
-  let page;
-
-  if (req.url === "/login") {
-    page = `
-      <h2>ورود</h2>
-      <form>
-        <input type="email" placeholder="ایمیل" required>
-        <br><br>
-        <input type="password" placeholder="رمز عبور" required>
-        <br><br>
-        <button type="submit">ورود</button>
-      </form>
-      <br>
-      <a href="/">بازگشت</a>
-    `;
-  } else if (req.url === "/signup") {
-    page = `
-      <h2>ثبت‌نام</h2>
-      <form>
-        <input type="text" placeholder="نام" required>
-        <br><br>
-        <input type="email" placeholder="ایمیل" required>
-        <br><br>
-        <input type="password" placeholder="رمز عبور" required>
-        <br><br>
-        <button type="submit">ثبت‌نام</button>
-      </form>
       <br>
       <a href="/">بازگشت</a>
     `;
