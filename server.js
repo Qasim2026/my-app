@@ -187,13 +187,27 @@ const server = http.createServer(async (req, res) => {
 
           res.writeHead(200, {
             "Content-Type": "text/html; charset=utf-8"
-          });
+          });if (result.rows.length > 0) {
+  res.end(html("صفحه اصلی", `
+    <h2>خوش آمدی ${result.rows[0].name} 👋</h2>
+    <p>ورود موفق بود ✅</p>
 
-          if (result.rows.length > 0) {
-            res.end(html("خوش آمدید", `
-              <h2>خوش آمدی ${result.rows[0].name} 👋</h2>
-              <p>ورود موفق بود.</p>
-            `));
+    <hr>
+
+    <h3>صفحه اصلی برنامه</h3>
+
+    <p>به برنامه خوش آمدی.</p>
+
+    <button>پروفایل</button>
+    <button>پیام‌ها</button>
+    <button>تنظیمات</button>
+
+    <br><br>
+
+    <a href="/">بازگشت به صفحه اصلی</a>
+  `));
+      }
+
           } else {
             res.end(html("خطا", `
               <h2>ایمیل یا رمز عبور اشتباه است.</h2>
