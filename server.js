@@ -1,3 +1,108 @@
+const http = require("http");
+const crypto = require("crypto");
+const { Pool } = require("pg");
+
+const port = process.env.PORT || 10000;
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+function hashPassword(password) {
+  return crypto
+    .createHash("sha256")
+    .update(password)
+    .digest("hex");
+}
+
+function html(title, content) {
+  return `
+    <!DOCTYPE html>
+    <html lang="fa" dir="rtl">
+    <head>
+      <meta charset="UTF-8">
+      <title>${title}</title>
+    </head>
+    <body>
+      ${content}
+    </body>
+    </html>
+  `;
+}
+
+async function createTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL
+    )
+  `);
+}
+
+const server = http.createServer(async (req, res) => {
+  try {
+
+    if (req.method === "GET" && req.url === "/") {
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8"
+      });
+
+      res.end(html("صفحه اصلی", `
+        <h1>خوش آمدید</h1>
+        <a href="/signup">
+          <button>ثبت‌نام</button>
+        </a>
+        <br><br>
+        <a href="/login">
+          <button>ورود</button>
+        </a>
+      `));
+
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/signup") {
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8"
+      });
+
+      res.end(html("ثبت‌نام", `
+        <h2>ثبت‌نام</h2>
+
+        <form method="POST" action="/signup">
+          <input name="name" placeholder="نام" required>
+          <br>
+          <input name="email" type="email" placeholder="ایمیل" required>
+          <br>
+          <input name="password" type="password" placeholder="رمز عبور" required>
+          <br>
+          <button type="submit">ثبت‌نام</button>
+        </form>
+
+        <a href="/">بازگشت</a>
+      `));
+
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/signup") {
+      let body = "";
+
+      req.on("data", chunk => {
+        body += chunk;
+      });
+
+      req.on("end", async () => {
+        const data = new URLSearchParams(body);
+
+        const name = data.get("name");
+        const email = data.get("email");
+        const password = data.get("password");
+
+        try {
           const hashedPassword = hashPassword(password);
 
           await pool.query(
