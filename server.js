@@ -10,25 +10,99 @@ const pool = new Pool({
 });
 
 function hashPassword(password) {
-  return crypto
-    .createHash("sha256")
-    .update(password)
-    .digest("hex");
+  return crypto.createHash("sha256").update(password).digest("hex");
 }
 
 function html(title, content) {
   return `
-    <!DOCTYPE html>
-    <html lang="fa" dir="rtl">
-    <head>
-      <meta charset="UTF-8">
-      <title>${title}</title>
-    </head>
-    <body>
-      ${content}
-    </body>
-    </html>
-  `;
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, sans-serif;
+      background: #f2f4f7;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+
+    .phone {
+      width: 100%;
+      max-width: 420px;
+      min-height: 650px;
+      background: white;
+      border-radius: 28px;
+      padding: 30px 22px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+      text-align: center;
+    }
+
+    h1, h2, h3 {
+      margin-top: 10px;
+    }
+
+    input {
+      width: 100%;
+      padding: 13px;
+      margin: 7px 0;
+      border: 1px solid #ccc;
+      border-radius: 10px;
+      font-size: 16px;
+    }
+
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 12px 18px;
+      margin: 6px;
+      font-size: 15px;
+      cursor: pointer;
+      background: #222;
+      color: white;
+    }
+
+    .main-button {
+      width: 90%;
+      margin: 10px auto;
+      display: block;
+    }
+
+    a {
+      color: #222;
+      text-decoration: none;
+    }
+
+    .divider {
+      height: 1px;
+      background: #ddd;
+      margin: 25px 0;
+    }
+
+    .welcome {
+      margin-top: 80px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="phone">
+    ${content}
+  </div>
+</body>
+</html>
+`;
 }
 
 async function createTable() {
@@ -51,17 +125,19 @@ const server = http.createServer(async (req, res) => {
       });
 
       res.end(html("صفحه اصلی", `
-        <h1>خوش آمدید</h1>
+        <div class="welcome">
+          <h1>خوش آمدید 👋</h1>
 
-        <a href="/signup">
-          <button>ثبت‌نام</button>
-        </a>
+          <p>به برنامه ما خوش آمدید.</p>
 
-        <br><br>
+          <a href="/signup">
+            <button class="main-button">ثبت‌نام</button>
+          </a>
 
-        <a href="/login">
-          <button>ورود</button>
-        </a>
+          <a href="/login">
+            <button class="main-button">ورود</button>
+          </a>
+        </div>
       `));
 
       return;
@@ -76,19 +152,35 @@ const server = http.createServer(async (req, res) => {
         <h2>ثبت‌نام</h2>
 
         <form method="POST" action="/signup">
-          <input name="name" placeholder="نام" required>
-          <br><br>
 
-          <input name="email" type="email" placeholder="ایمیل" required>
-          <br><br>
+          <input
+            name="name"
+            placeholder="نام"
+            required
+          >
 
-          <input name="password" type="password" placeholder="رمز عبور" required>
-          <br><br>
+          <input
+            name="email"
+            type="email"
+            placeholder="ایمیل"
+            required
+          >
 
-          <button type="submit">ثبت‌نام</button>
+          <input
+            name="password"
+            type="password"
+            placeholder="رمز عبور"
+            required
+          >
+
+          <button type="submit" class="main-button">
+            ثبت‌نام
+          </button>
+
         </form>
 
         <br>
+
         <a href="/">بازگشت</a>
       `));
 
@@ -122,12 +214,13 @@ const server = http.createServer(async (req, res) => {
             "Content-Type": "text/html; charset=utf-8"
           });
 
-          res.end(html("موفق", `
+          res.end(html("ثبت‌نام موفق", `
             <h2>ثبت‌نام موفق شد ✅</h2>
+
             <p>حساب شما ساخته شد.</p>
 
             <a href="/login">
-              <button>ورود</button>
+              <button class="main-button">ورود</button>
             </a>
           `));
 
@@ -140,6 +233,7 @@ const server = http.createServer(async (req, res) => {
 
           res.end(html("خطا", `
             <h2>ثبت‌نام انجام نشد.</h2>
+
             <p>ممکن است این ایمیل قبلاً ثبت شده باشد.</p>
 
             <a href="/signup">بازگشت</a>
@@ -159,16 +253,29 @@ const server = http.createServer(async (req, res) => {
         <h2>ورود</h2>
 
         <form method="POST" action="/login">
-          <input name="email" type="email" placeholder="ایمیل" required>
-          <br><br>
 
-          <input name="password" type="password" placeholder="رمز عبور" required>
-          <br><br>
+          <input
+            name="email"
+            type="email"
+            placeholder="ایمیل"
+            required
+          >
 
-          <button type="submit">ورود</button>
+          <input
+            name="password"
+            type="password"
+            placeholder="رمز عبور"
+            required
+          >
+
+          <button type="submit" class="main-button">
+            ورود
+          </button>
+
         </form>
 
         <br>
+
         <a href="/">بازگشت</a>
       `));
 
@@ -202,12 +309,13 @@ const server = http.createServer(async (req, res) => {
           });
 
           if (result.rows.length > 0) {
+
             res.end(html("صفحه اصلی", `
               <h2>خوش آمدی ${result.rows[0].name} 👋</h2>
 
               <p>ورود موفق بود ✅</p>
 
-              <hr>
+              <div class="divider"></div>
 
               <h3>صفحه اصلی برنامه</h3>
 
@@ -221,11 +329,15 @@ const server = http.createServer(async (req, res) => {
 
               <a href="/">بازگشت به صفحه اصلی</a>
             `));
+
           } else {
+
             res.end(html("خطا", `
               <h2>ایمیل یا رمز عبور اشتباه است.</h2>
 
-              <a href="/login">تلاش دوباره</a>
+              <a href="/login">
+                تلاش دوباره
+              </a>
             `));
           }
 
