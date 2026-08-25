@@ -1,4 +1,4 @@
-http = require("http");
+const http = require("http");
 const crypto = require("crypto");
 const { Pool } = require("pg");
 
@@ -52,10 +52,13 @@ const server = http.createServer(async (req, res) => {
 
       res.end(html("صفحه اصلی", `
         <h1>خوش آمدید</h1>
+
         <a href="/signup">
           <button>ثبت‌نام</button>
         </a>
+
         <br><br>
+
         <a href="/login">
           <button>ورود</button>
         </a>
@@ -74,14 +77,18 @@ const server = http.createServer(async (req, res) => {
 
         <form method="POST" action="/signup">
           <input name="name" placeholder="نام" required>
-          <br>
+          <br><br>
+
           <input name="email" type="email" placeholder="ایمیل" required>
-          <br>
+          <br><br>
+
           <input name="password" type="password" placeholder="رمز عبور" required>
-          <br>
+          <br><br>
+
           <button type="submit">ثبت‌نام</button>
         </form>
 
+        <br>
         <a href="/">بازگشت</a>
       `));
 
@@ -118,6 +125,7 @@ const server = http.createServer(async (req, res) => {
           res.end(html("موفق", `
             <h2>ثبت‌نام موفق شد ✅</h2>
             <p>حساب شما ساخته شد.</p>
+
             <a href="/login">
               <button>ورود</button>
             </a>
@@ -133,6 +141,7 @@ const server = http.createServer(async (req, res) => {
           res.end(html("خطا", `
             <h2>ثبت‌نام انجام نشد.</h2>
             <p>ممکن است این ایمیل قبلاً ثبت شده باشد.</p>
+
             <a href="/signup">بازگشت</a>
           `));
         }
@@ -151,12 +160,15 @@ const server = http.createServer(async (req, res) => {
 
         <form method="POST" action="/login">
           <input name="email" type="email" placeholder="ایمیل" required>
-          <br>
+          <br><br>
+
           <input name="password" type="password" placeholder="رمز عبور" required>
-          <br>
+          <br><br>
+
           <button type="submit">ورود</button>
         </form>
 
+        <br>
         <a href="/">بازگشت</a>
       `));
 
@@ -187,30 +199,32 @@ const server = http.createServer(async (req, res) => {
 
           res.writeHead(200, {
             "Content-Type": "text/html; charset=utf-8"
-          });if (result.rows.length > 0) {
-  res.end(html("صفحه اصلی", `
-    <h2>خوش آمدی ${result.rows[0].name} 👋</h2>
-    <p>ورود موفق بود ✅</p>
+          });
 
-    <hr>
+          if (result.rows.length > 0) {
+            res.end(html("صفحه اصلی", `
+              <h2>خوش آمدی ${result.rows[0].name} 👋</h2>
 
-    <h3>صفحه اصلی برنامه</h3>
+              <p>ورود موفق بود ✅</p>
 
-    <p>به برنامه خوش آمدی.</p>
+              <hr>
 
-    <button>پروفایل</button>
-    <button>پیام‌ها</button>
-    <button>تنظیمات</button>
+              <h3>صفحه اصلی برنامه</h3>
 
-    <br><br>
+              <p>به برنامه خوش آمدی.</p>
 
-    <a href="/">بازگشت به صفحه اصلی</a>
-  `));
-      }
+              <button>پروفایل</button>
+              <button>پیام‌ها</button>
+              <button>تنظیمات</button>
 
+              <br><br>
+
+              <a href="/">بازگشت به صفحه اصلی</a>
+            `));
           } else {
             res.end(html("خطا", `
               <h2>ایمیل یا رمز عبور اشتباه است.</h2>
+
               <a href="/login">تلاش دوباره</a>
             `));
           }
@@ -237,6 +251,7 @@ const server = http.createServer(async (req, res) => {
 
     res.end(html("یافت نشد", `
       <h2>صفحه پیدا نشد</h2>
+
       <a href="/">بازگشت</a>
     `));
 
