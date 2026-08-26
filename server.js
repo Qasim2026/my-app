@@ -9,15 +9,12 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// ======================================================
+// ==================================================
 // ابزارهای کمکی
-// ======================================================
+// ==================================================
 
 function hashPassword(password) {
-  return crypto
-    .createHash("sha256")
-    .update(password)
-    .digest("hex");
+  return crypto.createHash("sha256").update(password).digest("hex");
 }
 
 function escapeHtml(value) {
@@ -73,16 +70,11 @@ async function getSession(req) {
   const cookies = parseCookies(req);
   const sessionId = cookies.sessionId;
 
-  if (!sessionId) {
-    return null;
-  }
+  if (!sessionId) return null;
 
   const result = await pool.query(
     `
-    SELECT
-      users.id,
-      users.name,
-      users.email
+    SELECT users.id, users.name, users.email
     FROM sessions
     INNER JOIN users
       ON users.id = sessions.user_id
@@ -91,9 +83,7 @@ async function getSession(req) {
     [sessionId]
   );
 
-  if (result.rows.length === 0) {
-    return null;
-  }
+  if (result.rows.length === 0) return null;
 
   return result.rows[0];
 }
@@ -113,14 +103,6 @@ async function deleteSession(req) {
   );
 }
 
-function sendHtml(res, statusCode, title, content) {
-  res.writeHead(statusCode, {
-    "Content-Type": "text/html; charset=utf-8"
-  });
-
-  res.end(html(title, content));
-}
-
 function redirect(res, location, cookie) {
   const headers = {
     Location: location
@@ -134,6 +116,14 @@ function redirect(res, location, cookie) {
   res.end();
 }
 
+function sendHtml(res, statusCode, title, content) {
+  res.writeHead(statusCode, {
+    "Content-Type": "text/html; charset=utf-8"
+  });
+
+  res.end(html(title, content));
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -141,7 +131,7 @@ function readBody(req) {
     req.on("data", chunk => {
       body += chunk;
 
-      if (body.length > 2 * 1024 * 1024) {
+      if (body.length > 1024 * 1024) {
         req.destroy();
         reject(new Error("Request body too large"));
       }
@@ -155,17 +145,9 @@ function readBody(req) {
   });
 }
 
-function formatDate(date) {
-  try {
-    return new Date(date).toLocaleString("fa-IR");
-  } catch {
-    return "";
-  }
-}
-
-// ======================================================
+// ==================================================
 // قالب ظاهری
-// ======================================================
+// ==================================================
 
 function html(title, content) {
   return `
@@ -176,15 +158,11 @@ function html(title, content) {
 
 <meta charset="UTF-8">
 
-<meta
-  name="viewport"
-  content="width=device-width, initial-scale=1.0"
->
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0">
 
-<meta
-  name="description"
-  content="شبکه اجتماعی من"
->
+<meta name="description"
+      content="شبکه اجتماعی و کاریابی">
 
 <title>${escapeHtml(title)}</title>
 
@@ -196,132 +174,155 @@ function html(title, content) {
 
 body {
   margin: 0;
-  min-height: 100vh;
-
-  font-family:
-    Arial,
-    Tahoma,
-    sans-serif;
-
-  background: #f1f3f5;
-
-  color: #222;
-
-  padding: 15px;
+  background: #f2f4f7;
+  font-family: Arial, Tahoma, sans-serif;
+  color: #111;
 }
 
-.container {
+.phone {
   width: 100%;
-  max-width: 650px;
-
-  margin: 0 auto;
+  max-width: 520px;
+  min-height: 100vh;
+  margin: auto;
+  background: #fff;
+  box-shadow: 0 0 25px rgba(0,0,0,.08);
+  padding-bottom: 90px;
 }
 
 .topbar {
-  background: white;
-
-  border-radius: 18px;
-
-  padding: 15px;
-
-  margin-bottom: 15px;
-
-  box-shadow:
-    0 3px 15px rgba(0,0,0,0.08);
-
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #fff;
+  border-bottom: 1px solid #ddd;
+  padding: 16px;
   text-align: center;
 }
 
-.topbar h1 {
-  margin: 5px 0;
+.topbar h2 {
+  margin: 0;
+}
+
+.content {
+  padding: 15px;
 }
 
 .card {
-  background: white;
-
-  border-radius: 18px;
-
-  padding: 18px;
-
-  margin: 15px 0;
-
-  box-shadow:
-    0 3px 15px rgba(0,0,0,0.08);
+  background: #fff;
+  border: 1px solid #e1e1e1;
+  border-radius: 16px;
+  margin-bottom: 15px;
+  overflow: hidden;
 }
 
-input,
-textarea {
+.card-padding {
+  padding: 15px;
+}
+
+.post-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+}
+
+.avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #222;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+}
+
+.post-name {
+  font-weight: bold;
+}
+
+.post-email {
+  color: #777;
+  font-size: 12px;
+}
+
+.post-image {
   width: 100%;
-
-  padding: 13px;
-
-  margin: 7px 0;
-
-  border: 1px solid #ccc;
-
-  border-radius: 10px;
-
-  font-size: 16px;
-
-  font-family:
-    Arial,
-    Tahoma,
-    sans-serif;
+  max-height: 500px;
+  object-fit: cover;
+  display: block;
 }
 
-textarea {
-  min-height: 110px;
-  resize: vertical;
+.post-text {
+  padding: 15px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.8;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 15px 15px;
+  flex-wrap: wrap;
+}
+
+.actions button {
+  flex: 1;
 }
 
 button {
   border: none;
-
   border-radius: 10px;
-
-  padding: 11px 16px;
-
-  margin: 5px;
-
-  font-size: 15px;
-
-  cursor: pointer;
-
+  padding: 11px 15px;
   background: #222;
-
   color: white;
+  font-size: 14px;
+  cursor: pointer;
 }
 
 button:hover {
-  opacity: 0.88;
+  opacity: .9;
 }
 
-.main-button {
-  display: block;
-
-  width: 94%;
-
-  margin: 9px auto;
-}
-
-.secondary-button {
-  background: #666;
-}
-
-.danger-button {
+.red {
   background: #b00020;
 }
 
-a {
-  color: #222;
-  text-decoration: none;
+.green {
+  background: #087f23;
+}
+
+.blue {
+  background: #2457d6;
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  padding: 13px;
+  margin: 7px 0;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  font-size: 16px;
+  font-family: Arial, Tahoma, sans-serif;
+}
+
+textarea {
+  min-height: 130px;
+  resize: vertical;
+}
+
+.main-button {
+  width: 100%;
+  margin: 7px 0;
 }
 
 .divider {
   height: 1px;
-
   background: #ddd;
-
   margin: 20px 0;
 }
 
@@ -342,166 +343,99 @@ a {
   font-size: 13px;
 }
 
-.profile-header {
-  text-align: center;
-  padding: 10px;
+.job-card {
+  background: #f7f7f7;
+  border-radius: 15px;
+  padding: 15px;
+  margin: 12px 0;
 }
 
-.avatar {
-  width: 85px;
-  height: 85px;
-
-  border-radius: 50%;
-
-  background: #ddd;
-
-  margin: 0 auto 10px;
-
-  display: flex;
-
-  align-items: center;
-  justify-content: center;
-
-  font-size: 38px;
-}
-
-.post {
-  background: white;
-
-  border-radius: 18px;
-
-  padding: 18px;
-
-  margin: 15px 0;
-
-  box-shadow:
-    0 3px 15px rgba(0,0,0,0.08);
-}
-
-.post-author {
+.job-title {
+  font-size: 18px;
   font-weight: bold;
-
-  font-size: 17px;
-
-  margin-bottom: 5px;
 }
 
-.post-text {
-  white-space: pre-wrap;
-
-  word-break: break-word;
-
-  line-height: 1.8;
-
-  margin: 15px 0;
+.job-city {
+  color: #555;
+  margin-top: 7px;
 }
 
-.post-image {
-  width: 100%;
-
-  max-height: 500px;
-
-  object-fit: cover;
-
-  border-radius: 14px;
-
-  margin-top: 10px;
+.job-salary {
+  font-weight: bold;
+  margin-top: 7px;
 }
 
-.post-actions {
-  display: flex;
-
-  gap: 5px;
-
-  flex-wrap: wrap;
+.user-card {
+  background: #f7f7f7;
+  padding: 15px;
+  border-radius: 15px;
+  margin: 12px 0;
 }
 
 .comment {
-  background: #f4f4f4;
-
+  background: #f5f5f5;
   border-radius: 12px;
-
   padding: 10px;
-
-  margin: 8px 0;
+  margin-top: 8px;
 }
 
 .comment-name {
   font-weight: bold;
 }
 
-.user-card {
-  background: #f7f7f7;
-
-  border-radius: 14px;
-
-  padding: 15px;
-
-  margin: 10px 0;
+.message {
+  padding: 12px;
+  border-radius: 12px;
+  margin: 8px 0;
 }
 
-.job-card {
-  background: #f7f7f7;
-
-  border-radius: 15px;
-
-  padding: 16px;
-
-  margin: 12px 0;
+.sent {
+  background: #eeeeee;
 }
 
-.job-title {
-  font-size: 19px;
-
-  font-weight: bold;
+.received {
+  background: #e8f5e9;
 }
 
-.job-city {
-  margin-top: 7px;
-
-  color: #555;
-}
-
-.job-salary {
-  margin-top: 7px;
-
-  font-weight: bold;
-}
-
-.message-card {
-  padding: 13px;
-
-  border-radius: 14px;
-
-  margin: 10px 0;
-
-  background: #f4f4f4;
-}
-
-.message-sent {
-  border-right: 4px solid #555;
-}
-
-.message-received {
-  border-right: 4px solid #087f23;
-}
-
-.nav-grid {
-  display: grid;
-
-  grid-template-columns:
-    1fr 1fr;
-
-  gap: 8px;
-}
-
-.nav-grid a button {
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
   width: 100%;
-  margin: 0;
+  max-width: 520px;
+  background: white;
+  border-top: 1px solid #ddd;
+  display: flex;
+  justify-content: space-around;
+  padding: 9px 4px;
+  z-index: 20;
 }
 
-.small-form {
-  margin-top: 10px;
+.bottom-nav a {
+  text-decoration: none;
+  color: #222;
+  font-size: 12px;
+  text-align: center;
+}
+
+.bottom-nav span {
+  display: block;
+  font-size: 21px;
+}
+
+.back {
+  display: block;
+  text-align: center;
+  margin-top: 15px;
+  color: #222;
+  font-weight: bold;
+}
+
+.empty {
+  text-align: center;
+  color: #777;
+  padding: 30px 10px;
 }
 
 </style>
@@ -510,7 +444,7 @@ a {
 
 <body>
 
-<div class="container">
+<div class="phone">
 
 ${content}
 
@@ -522,222 +456,168 @@ ${content}
 `;
 }
 
-// ======================================================
-// دیتابیس
-// ======================================================
+// ==================================================
+// نوار پایین برنامه
+// ==================================================
+
+function bottomNav() {
+  return `
+  <div class="bottom-nav">
+
+    <a href="/">
+      <span>🏠</span>
+      خانه
+    </a>
+
+    <a href="/search">
+      <span>🔎</span>
+      جستجو
+    </a>
+
+    <a href="/create-post">
+      <span>➕</span>
+      انتشار
+    </a>
+
+    <a href="/messages">
+      <span>💬</span>
+      پیام
+    </a>
+
+    <a href="/profile">
+      <span>👤</span>
+      پروفایل
+    </a>
+
+  </div>
+  `;
+}
+
+// ==================================================
+// ساخت جداول
+// ==================================================
 
 async function createTables() {
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
-
       id SERIAL PRIMARY KEY,
-
       name TEXT NOT NULL,
-
       email TEXT UNIQUE NOT NULL,
-
       password TEXT NOT NULL,
-
-      created_at TIMESTAMP
-        DEFAULT CURRENT_TIMESTAMP
-
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions (
-
       session_id TEXT PRIMARY KEY,
-
       user_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-
-      created_at TIMESTAMP
-        DEFAULT CURRENT_TIMESTAMP
-
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS messages (
-
       id SERIAL PRIMARY KEY,
-
       sender_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-
       receiver_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-
       message TEXT NOT NULL,
-
-      created_at TIMESTAMP
-        DEFAULT CURRENT_TIMESTAMP
-
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS posts (
-
       id SERIAL PRIMARY KEY,
-
       user_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-
       text TEXT NOT NULL,
-
       image_url TEXT,
-
-      created_at TIMESTAMP
-        DEFAULT CURRENT_TIMESTAMP
-
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS likes (
-
       id SERIAL PRIMARY KEY,
-
-      user_id INTEGER NOT NULL
-        REFERENCES users(id)
-        ON DELETE CASCADE,
-
       post_id INTEGER NOT NULL
         REFERENCES posts(id)
         ON DELETE CASCADE,
-
-      UNIQUE(user_id, post_id)
-
+      user_id INTEGER NOT NULL
+        REFERENCES users(id)
+        ON DELETE CASCADE,
+      UNIQUE(post_id, user_id)
     )
   `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS comments (
-
       id SERIAL PRIMARY KEY,
-
-      user_id INTEGER NOT NULL
-        REFERENCES users(id)
-        ON DELETE CASCADE,
-
       post_id INTEGER NOT NULL
         REFERENCES posts(id)
         ON DELETE CASCADE,
-
+      user_id INTEGER NOT NULL
+        REFERENCES users(id)
+        ON DELETE CASCADE,
       comment TEXT NOT NULL,
-
-      created_at TIMESTAMP
-        DEFAULT CURRENT_TIMESTAMP
-
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS follows (
-
       id SERIAL PRIMARY KEY,
-
       follower_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-
       following_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-
-      UNIQUE(follower_id, following_id)
-
+      UNIQUE(follower_id, following_id),
+      CHECK(follower_id <> following_id)
     )
   `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS jobs (
-
       id SERIAL PRIMARY KEY,
-
       user_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-
       title TEXT NOT NULL,
-
       city TEXT NOT NULL,
-
       salary TEXT NOT NULL,
-
       description TEXT NOT NULL,
-
-      created_at TIMESTAMP
-        DEFAULT CURRENT_TIMESTAMP
-
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-  `);
-
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS
-    posts_user_id_index
-    ON posts(user_id)
-  `);
-
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS
-    messages_sender_id_index
-    ON messages(sender_id)
-  `);
-
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS
-    messages_receiver_id_index
-    ON messages(receiver_id)
-  `);
-
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS
-    comments_post_id_index
-    ON comments(post_id)
-  `);
-
-  await pool.query(`
-    CREATE INDEX IF NOT EXISTS
-    jobs_city_index
-    ON jobs(city)
   `);
 
   console.log("All database tables are ready.");
 }
 
-// ======================================================
+// ==================================================
 // سرور
-// ======================================================
+// ==================================================
 
 const server = http.createServer(async (req, res) => {
 
   try {
 
-    const url = new URL(
-      req.url,
-      "http://localhost"
-    );
-
-    const pathname = url.pathname;
+    const user = await getSession(req);
 
     // ==================================================
     // صفحه اصلی
     // ==================================================
 
-    if (
-      req.method === "GET" &&
-      pathname === "/"
-    ) {
-
-      const user = await getSession(req);
+    if (req.method === "GET" && req.url === "/") {
 
       if (!user) {
 
@@ -746,127 +626,206 @@ const server = http.createServer(async (req, res) => {
           200,
           "شبکه اجتماعی",
           `
+          <div class="content center">
 
-          <div class="card center">
+            <div style="padding-top:100px">
 
-            <h1>
-              خوش آمدید 👋
-            </h1>
+              <h1>
+                شبکه اجتماعی ما 🌐
+              </h1>
 
-            <p>
-              شبکه اجتماعی و کاریابی
-            </p>
+              <p>
+                شبکه اجتماعی + کاریابی
+              </p>
 
-            <div class="divider"></div>
+              <div class="divider"></div>
 
-            <a href="/signup">
-              <button class="main-button">
-                ثبت‌نام
-              </button>
-            </a>
+              <a href="/signup">
+                <button class="main-button">
+                  ثبت‌نام
+                </button>
+              </a>
 
-            <a href="/login">
-              <button class="main-button">
-                ورود
-              </button>
-            </a>
+              <a href="/login">
+                <button class="main-button">
+                  ورود
+                </button>
+              </a>
+
+            </div>
 
           </div>
-
           `
         );
 
         return;
       }
 
+      const postsResult = await pool.query(`
+        SELECT
+          posts.id,
+          posts.text,
+          posts.image_url,
+          posts.created_at,
+          users.id AS user_id,
+          users.name,
+          users.email,
+          (
+            SELECT COUNT(*)
+            FROM likes
+            WHERE likes.post_id = posts.id
+          ) AS like_count,
+          (
+            SELECT COUNT(*)
+            FROM comments
+            WHERE comments.post_id = posts.id
+          ) AS comment_count
+        FROM posts
+        INNER JOIN users
+          ON users.id = posts.user_id
+        ORDER BY posts.created_at DESC
+        LIMIT 50
+      `);
+
+      let postsHtml = "";
+
+      if (postsResult.rows.length === 0) {
+
+        postsHtml = `
+          <div class="empty">
+            هنوز پستی منتشر نشده است.
+            <br><br>
+            اولین پست را تو منتشر کن! 📸
+          </div>
+        `;
+
+      } else {
+
+        for (const post of postsResult.rows) {
+
+          const date =
+            new Date(post.created_at)
+              .toLocaleString("fa-IR");
+
+          const imageHtml =
+            post.image_url
+              ? `
+                <img
+                  class="post-image"
+                  src="${escapeHtml(post.image_url)}"
+                  alt="تصویر پست"
+                >
+              `
+              : "";
+
+          postsHtml += `
+            <div class="card">
+
+              <div class="post-header">
+
+                <div class="avatar">
+                  ${escapeHtml(
+                    (post.name || "?").charAt(0)
+                  )}
+                </div>
+
+                <div>
+
+                  <div class="post-name">
+                    ${escapeHtml(post.name)}
+                  </div>
+
+                  <div class="post-email">
+                    ${escapeHtml(post.email)}
+                  </div>
+
+                </div>
+
+              </div>
+
+              ${imageHtml}
+
+              <div class="post-text">
+                ${escapeHtml(post.text)}
+              </div>
+
+              <div class="actions">
+
+                <form method="POST"
+                      action="/like"
+                      style="flex:1">
+
+                  <input
+                    type="hidden"
+                    name="post_id"
+                    value="${post.id}"
+                  >
+
+                  <button
+                    type="submit"
+                    class="main-button"
+                  >
+                    ❤️ ${post.like_count}
+                  </button>
+
+                </form>
+
+                <a
+                  href="/post?id=${post.id}"
+                  style="flex:1"
+                >
+                  <button
+                    type="button"
+                    class="main-button"
+                  >
+                    💬 ${post.comment_count}
+                  </button>
+                </a>
+
+              </div>
+
+              <div
+                class="muted"
+                style="padding:0 15px 15px"
+              >
+                ${escapeHtml(date)}
+              </div>
+
+            </div>
+          `;
+        }
+      }
+
       sendHtml(
         res,
         200,
-        "صفحه اصلی",
+        "صفحه اجتماعی",
         `
-
         <div class="topbar">
-
-          <h2>
-            خوش آمدی
-            ${escapeHtml(user.name)}
-            👋
-          </h2>
-
-          <p class="success">
-            ورود موفق بود ✅
-          </p>
-
+          <h2>صفحه اجتماعی 🏠</h2>
         </div>
 
-        <div class="card">
+        <div class="content">
 
-          <h3 class="center">
-            منوی برنامه
-          </h3>
+          <div class="card card-padding center">
 
-          <div class="nav-grid">
-
-            <a href="/feed">
-              <button>
-                صفحه اجتماعی 🏠
-              </button>
-            </a>
+            <h3>
+              خوش آمدی ${escapeHtml(user.name)} 👋
+            </h3>
 
             <a href="/create-post">
-              <button>
-                انتشار پست ➕
-              </button>
-            </a>
-
-            <a href="/users">
-              <button>
-                کاربران 👥
-              </button>
-            </a>
-
-            <a href="/jobs">
-              <button>
-                جستجوی کار 🔎
-              </button>
-            </a>
-
-            <a href="/create-job">
-              <button>
-                ثبت آگهی کار 💼
-              </button>
-            </a>
-
-            <a href="/messages">
-              <button>
-                پیام‌ها 💬
-              </button>
-            </a>
-
-            <a href="/profile">
-              <button>
-                پروفایل 👤
-              </button>
-            </a>
-
-            <a href="/settings">
-              <button>
-                تنظیمات ⚙️
+              <button class="blue">
+                ➕ انتشار پست جدید
               </button>
             </a>
 
           </div>
 
-          <div class="divider"></div>
-
-          <a href="/logout">
-            <button class="main-button danger-button">
-              خروج
-            </button>
-          </a>
+          ${postsHtml}
 
         </div>
 
+        ${bottomNav()}
         `
       );
 
@@ -877,27 +836,20 @@ const server = http.createServer(async (req, res) => {
     // ثبت نام
     // ==================================================
 
-    if (
-      req.method === "GET" &&
-      pathname === "/signup"
-    ) {
+    if (req.method === "GET" && req.url === "/signup") {
 
       sendHtml(
         res,
         200,
-        "ثبت نام",
+        "ثبت‌نام",
         `
-
-        <div class="card">
+        <div class="content">
 
           <h2 class="center">
             ثبت‌نام
           </h2>
 
-          <form
-            method="POST"
-            action="/signup"
-          >
+          <form method="POST" action="/signup">
 
             <input
               name="name"
@@ -931,22 +883,18 @@ const server = http.createServer(async (req, res) => {
 
           </form>
 
-          <a href="/">
-            بازگشت
+          <a class="back" href="/login">
+            قبلاً حساب ساخته‌ام
           </a>
 
         </div>
-
         `
       );
 
       return;
     }
 
-    if (
-      req.method === "POST" &&
-      pathname === "/signup"
-    ) {
+    if (req.method === "POST" && req.url === "/signup") {
 
       const data = await readBody(req);
 
@@ -961,21 +909,17 @@ const server = http.createServer(async (req, res) => {
       const password =
         data.get("password") || "";
 
-      if (
-        !name ||
-        !email ||
-        !password
-      ) {
+      if (!name || !email || !password) {
 
         sendHtml(
           res,
           400,
           "خطا",
           `
-          <div class="card center">
+          <div class="content center">
 
             <h2 class="error">
-              اطلاعات ناقص است
+              اطلاعات ناقص است.
             </h2>
 
             <a href="/signup">
@@ -996,7 +940,7 @@ const server = http.createServer(async (req, res) => {
           400,
           "خطا",
           `
-          <div class="card center">
+          <div class="content center">
 
             <h2 class="error">
               رمز عبور باید حداقل ۶ کاراکتر باشد.
@@ -1031,21 +975,17 @@ const server = http.createServer(async (req, res) => {
         sendHtml(
           res,
           200,
-          "ثبت نام موفق",
+          "ثبت‌نام موفق",
           `
-          <div class="card center">
+          <div class="content center">
 
             <h2 class="success">
               ثبت‌نام موفق شد ✅
             </h2>
 
-            <p>
-              حساب شما ساخته شد.
-            </p>
-
             <a href="/login">
               <button>
-                ورود
+                ورود به حساب
               </button>
             </a>
 
@@ -1055,10 +995,7 @@ const server = http.createServer(async (req, res) => {
 
       } catch (error) {
 
-        console.error(
-          "Signup error:",
-          error
-        );
+        console.error(error);
 
         if (error.code === "23505") {
 
@@ -1067,7 +1004,7 @@ const server = http.createServer(async (req, res) => {
             400,
             "خطا",
             `
-            <div class="card center">
+            <div class="content center">
 
               <h2 class="error">
                 این ایمیل قبلاً ثبت شده است.
@@ -1088,10 +1025,10 @@ const server = http.createServer(async (req, res) => {
             500,
             "خطا",
             `
-            <div class="card center">
+            <div class="content center">
 
               <h2 class="error">
-                خطایی در ثبت‌نام رخ داد.
+                خطا در ثبت‌نام
               </h2>
 
             </div>
@@ -1107,27 +1044,20 @@ const server = http.createServer(async (req, res) => {
     // ورود
     // ==================================================
 
-    if (
-      req.method === "GET" &&
-      pathname === "/login"
-    ) {
+    if (req.method === "GET" && req.url === "/login") {
 
       sendHtml(
         res,
         200,
         "ورود",
         `
-
-        <div class="card">
+        <div class="content">
 
           <h2 class="center">
             ورود
           </h2>
 
-          <form
-            method="POST"
-            action="/login"
-          >
+          <form method="POST" action="/login">
 
             <input
               name="email"
@@ -1152,22 +1082,18 @@ const server = http.createServer(async (req, res) => {
 
           </form>
 
-          <a href="/">
-            بازگشت
+          <a class="back" href="/signup">
+            ساخت حساب جدید
           </a>
 
         </div>
-
         `
       );
 
       return;
     }
 
-    if (
-      req.method === "POST" &&
-      pathname === "/login"
-    ) {
+    if (req.method === "POST" && req.url === "/login") {
 
       const data = await readBody(req);
 
@@ -1179,372 +1105,63 @@ const server = http.createServer(async (req, res) => {
       const password =
         data.get("password") || "";
 
-      try {
+      const result = await pool.query(
+        `
+        SELECT id, name, email
+        FROM users
+        WHERE email = $1
+          AND password = $2
+        `,
+        [
+          email,
+          hashPassword(password)
+        ]
+      );
 
-        const result =
-          await pool.query(
-            `
-            SELECT id, name, email
-            FROM users
-            WHERE email = $1
-              AND password = $2
-            `,
-            [
-              email,
-              hashPassword(password)
-            ]
-          );
-
-        if (result.rows.length === 0) {
-
-          sendHtml(
-            res,
-            401,
-            "خطا",
-            `
-            <div class="card center">
-
-              <h2 class="error">
-                ایمیل یا رمز عبور اشتباه است.
-              </h2>
-
-              <a href="/login">
-                تلاش دوباره
-              </a>
-
-            </div>
-            `
-          );
-
-          return;
-        }
-
-        const user = result.rows[0];
-
-        const sessionId =
-          await createSession(user.id);
-
-        const cookie =
-          `sessionId=${encodeURIComponent(sessionId)}; ` +
-          `HttpOnly; Path=/; SameSite=Lax`;
-
-        redirect(
-          res,
-          "/",
-          cookie
-        );
-
-      } catch (error) {
-
-        console.error(
-          "Login error:",
-          error
-        );
+      if (result.rows.length === 0) {
 
         sendHtml(
           res,
-          500,
-          "خطا",
+          401,
+          "ورود",
           `
-          <div class="card center">
+          <div class="content center">
 
             <h2 class="error">
-              خطای دیتابیس
+              ایمیل یا رمز عبور اشتباه است.
             </h2>
 
             <a href="/login">
-              بازگشت
+              تلاش دوباره
             </a>
 
           </div>
           `
         );
-      }
 
-      return;
-    }
-
-    // ==================================================
-    // صفحه اجتماعی / فید
-    // ==================================================
-
-    if (
-      req.method === "GET" &&
-      pathname === "/feed"
-    ) {
-
-      const user = await getSession(req);
-
-      if (!user) {
-        redirect(res, "/login");
         return;
       }
 
-      const postsResult =
-        await pool.query(
-          `
-          SELECT
-            posts.id,
-            posts.text,
-            posts.image_url,
-            posts.created_at,
-            users.id AS user_id,
-            users.name,
-            users.email,
-            (
-              SELECT COUNT(*)
-              FROM likes
-              WHERE likes.post_id = posts.id
-            ) AS like_count,
-            (
-              SELECT COUNT(*)
-              FROM comments
-              WHERE comments.post_id = posts.id
-            ) AS comment_count,
-            EXISTS(
-              SELECT 1
-              FROM likes
-              WHERE likes.post_id = posts.id
-                AND likes.user_id = $1
-            ) AS liked
-          FROM posts
-          INNER JOIN users
-            ON users.id = posts.user_id
-          ORDER BY posts.created_at DESC
-          `,
-          [user.id]
-        );
+      const sessionId =
+        await createSession(result.rows[0].id);
 
-      let postsHtml = "";
+      const cookie =
+        `sessionId=${encodeURIComponent(sessionId)}; ` +
+        `HttpOnly; Path=/; SameSite=Lax`;
 
-      if (postsResult.rows.length === 0) {
-
-        postsHtml = `
-        <div class="card center">
-
-          <p>
-            هنوز پستی منتشر نشده است.
-          </p>
-
-          <a href="/create-post">
-            <button>
-              اولین پست را منتشر کن
-            </button>
-          </a>
-
-        </div>
-        `;
-
-      } else {
-
-        for (const post of postsResult.rows) {
-
-          const commentsResult =
-            await pool.query(
-              `
-              SELECT
-                comments.comment,
-                comments.created_at,
-                users.name
-              FROM comments
-              INNER JOIN users
-                ON users.id = comments.user_id
-              WHERE comments.post_id = $1
-              ORDER BY comments.created_at ASC
-              `,
-              [post.id]
-            );
-
-          let commentsHtml = "";
-
-          commentsResult.rows.forEach(comment => {
-
-            commentsHtml += `
-            <div class="comment">
-
-              <div class="comment-name">
-                ${escapeHtml(comment.name)}
-              </div>
-
-              <div>
-                ${escapeHtml(comment.comment)}
-              </div>
-
-              <div class="muted">
-                ${escapeHtml(formatDate(comment.created_at))}
-              </div>
-
-            </div>
-            `;
-
-          });
-
-          if (!commentsHtml) {
-
-            commentsHtml = `
-            <div class="muted">
-              هنوز نظری ثبت نشده است.
-            </div>
-            `;
-
-          }
-
-          const imageHtml =
-            post.image_url
-              ? `
-                <img
-                  class="post-image"
-                  src="${escapeHtml(post.image_url)}"
-                  alt="تصویر پست"
-                >
-              `
-              : "";
-
-          postsHtml += `
-
-          <div class="post">
-
-            <div class="post-author">
-
-              <a href="/user?id=${post.user_id}">
-                ${escapeHtml(post.name)}
-              </a>
-
-            </div>
-
-            <div class="muted">
-              ${escapeHtml(post.email)}
-            </div>
-
-            <div class="muted">
-              ${escapeHtml(formatDate(post.created_at))}
-            </div>
-
-            <div class="post-text">
-              ${escapeHtml(post.text)}
-            </div>
-
-            ${imageHtml}
-
-            <div class="divider"></div>
-
-            <div class="post-actions">
-
-              <form
-                method="POST"
-                action="/like"
-              >
-
-                <input
-                  type="hidden"
-                  name="post_id"
-                  value="${escapeHtml(post.id)}"
-                >
-
-                <button type="submit">
-                  ${post.liked ? "❤️ پسندیده شد" : "🤍 لایک"}
-                  (${escapeHtml(post.like_count)})
-                </button>
-
-              </form>
-
-              <span>
-                💬 ${escapeHtml(post.comment_count)}
-              </span>
-
-            </div>
-
-            <div class="divider"></div>
-
-            <h4>
-              نظرات
-            </h4>
-
-            ${commentsHtml}
-
-            <form
-              method="POST"
-              action="/comment"
-              class="small-form"
-            >
-
-              <input
-                type="hidden"
-                name="post_id"
-                value="${escapeHtml(post.id)}"
-              >
-
-              <input
-                name="comment"
-                placeholder="نظر خود را بنویس..."
-                maxlength="1000"
-                required
-              >
-
-              <button type="submit">
-                ارسال نظر
-              </button>
-
-            </form>
-
-          </div>
-
-          `;
-        }
-      }
-
-      sendHtml(
-        res,
-        200,
-        "صفحه اجتماعی",
-        `
-
-        <div class="topbar">
-
-          <h2>
-            صفحه اجتماعی 🏠
-          </h2>
-
-          <p>
-            ${escapeHtml(user.name)}
-          </p>
-
-        </div>
-
-        <div class="card">
-
-          <a href="/create-post">
-            <button class="main-button">
-              ➕ انتشار پست جدید
-            </button>
-          </a>
-
-          <a href="/">
-            <button class="main-button secondary-button">
-              صفحه اصلی
-            </button>
-          </a>
-
-        </div>
-
-        ${postsHtml}
-
-        `
-      );
+      redirect(res, "/", cookie);
 
       return;
     }
 
     // ==================================================
-    // ساخت پست
+    // انتشار پست
     // ==================================================
 
     if (
       req.method === "GET" &&
-      pathname === "/create-post"
+      req.url === "/create-post"
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
@@ -1556,47 +1173,50 @@ const server = http.createServer(async (req, res) => {
         200,
         "انتشار پست",
         `
+        <div class="topbar">
+          <h2>انتشار پست ➕</h2>
+        </div>
 
-        <div class="card">
+        <div class="content">
 
-          <h2 class="center">
-            انتشار پست ➕
-          </h2>
+          <div class="card card-padding">
 
-          <form
-            method="POST"
-            action="/create-post"
-          >
-
-            <textarea
-              name="text"
-              placeholder="چه خبر؟"
-              maxlength="5000"
-              required
-            ></textarea>
-
-            <input
-              name="image_url"
-              type="url"
-              placeholder="لینک تصویر، در صورت تمایل"
-              maxlength="1000"
+            <form
+              method="POST"
+              action="/create-post"
             >
 
-            <button
-              type="submit"
-              class="main-button"
-            >
-              انتشار پست
-            </button>
+              <textarea
+                name="text"
+                maxlength="5000"
+                placeholder="چه چیزی می‌خواهی منتشر کنی؟"
+                required
+              ></textarea>
 
-          </form>
+              <input
+                name="image_url"
+                type="url"
+                placeholder="لینک تصویر، در صورت تمایل"
+              >
 
-          <a href="/feed">
+              <button
+                type="submit"
+                class="main-button blue"
+              >
+                انتشار پست 📤
+              </button>
+
+            </form>
+
+          </div>
+
+          <a class="back" href="/">
             بازگشت به صفحه اجتماعی
           </a>
 
         </div>
 
+        ${bottomNav()}
         `
       );
 
@@ -1605,10 +1225,8 @@ const server = http.createServer(async (req, res) => {
 
     if (
       req.method === "POST" &&
-      pathname === "/create-post"
+      req.url === "/create-post"
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
@@ -1630,10 +1248,10 @@ const server = http.createServer(async (req, res) => {
           400,
           "خطا",
           `
-          <div class="card center">
+          <div class="content center">
 
             <h2 class="error">
-              متن پست خالی است.
+              متن پست نمی‌تواند خالی باشد.
             </h2>
 
             <a href="/create-post">
@@ -1660,7 +1278,7 @@ const server = http.createServer(async (req, res) => {
         ]
       );
 
-      redirect(res, "/feed");
+      redirect(res, "/");
 
       return;
     }
@@ -1671,10 +1289,8 @@ const server = http.createServer(async (req, res) => {
 
     if (
       req.method === "POST" &&
-      pathname === "/like"
+      req.url === "/like"
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
@@ -1686,11 +1302,8 @@ const server = http.createServer(async (req, res) => {
       const postId =
         Number(data.get("post_id"));
 
-      if (
-        !Number.isInteger(postId) ||
-        postId <= 0
-      ) {
-        redirect(res, "/feed");
+      if (!Number.isInteger(postId)) {
+        redirect(res, "/");
         return;
       }
 
@@ -1699,13 +1312,10 @@ const server = http.createServer(async (req, res) => {
           `
           SELECT id
           FROM likes
-          WHERE user_id = $1
-            AND post_id = $2
+          WHERE post_id = $1
+            AND user_id = $2
           `,
-          [
-            user.id,
-            postId
-          ]
+          [postId, user.id]
         );
 
       if (existing.rows.length > 0) {
@@ -1713,13 +1323,10 @@ const server = http.createServer(async (req, res) => {
         await pool.query(
           `
           DELETE FROM likes
-          WHERE user_id = $1
-            AND post_id = $2
+          WHERE post_id = $1
+            AND user_id = $2
           `,
-          [
-            user.id,
-            postId
-          ]
+          [postId, user.id]
         );
 
       } else {
@@ -1727,32 +1334,226 @@ const server = http.createServer(async (req, res) => {
         await pool.query(
           `
           INSERT INTO likes
-          (user_id, post_id)
+          (post_id, user_id)
           VALUES ($1, $2)
           ON CONFLICT DO NOTHING
           `,
-          [
-            user.id,
-            postId
-          ]
+          [postId, user.id]
         );
       }
 
-      redirect(res, "/feed");
+      redirect(res, "/");
 
       return;
     }
 
     // ==================================================
-    // کامنت
+    // نمایش پست و کامنت‌ها
+    // ==================================================
+
+    if (
+      req.method === "GET" &&
+      req.url.startsWith("/post")
+    ) {
+
+      if (!user) {
+        redirect(res, "/login");
+        return;
+      }
+
+      const url =
+        new URL(req.url, "http://localhost");
+
+      const postId =
+        Number(url.searchParams.get("id"));
+
+      const postResult =
+        await pool.query(
+          `
+          SELECT
+            posts.*,
+            users.name,
+            users.email
+          FROM posts
+          INNER JOIN users
+            ON users.id = posts.user_id
+          WHERE posts.id = $1
+          `,
+          [postId]
+        );
+
+      if (postResult.rows.length === 0) {
+
+        sendHtml(
+          res,
+          404,
+          "پست",
+          `
+          <div class="content center">
+            <h2>پست پیدا نشد.</h2>
+            <a href="/">بازگشت</a>
+          </div>
+          `
+        );
+
+        return;
+      }
+
+      const post = postResult.rows[0];
+
+      const commentsResult =
+        await pool.query(
+          `
+          SELECT
+            comments.comment,
+            comments.created_at,
+            users.name
+          FROM comments
+          INNER JOIN users
+            ON users.id = comments.user_id
+          WHERE comments.post_id = $1
+          ORDER BY comments.created_at ASC
+          `,
+          [postId]
+        );
+
+      let commentsHtml = "";
+
+      commentsResult.rows.forEach(comment => {
+
+        commentsHtml += `
+          <div class="comment">
+
+            <div class="comment-name">
+              ${escapeHtml(comment.name)}
+            </div>
+
+            <div>
+              ${escapeHtml(comment.comment)}
+            </div>
+
+          </div>
+        `;
+      });
+
+      if (!commentsHtml) {
+        commentsHtml = `
+          <div class="empty">
+            هنوز کامنتی وجود ندارد.
+          </div>
+        `;
+      }
+
+      sendHtml(
+        res,
+        200,
+        "پست",
+        `
+        <div class="topbar">
+          <h2>پست 💬</h2>
+        </div>
+
+        <div class="content">
+
+          <div class="card">
+
+            <div class="post-header">
+
+              <div class="avatar">
+                ${escapeHtml(
+                  post.name.charAt(0)
+                )}
+              </div>
+
+              <div>
+                <div class="post-name">
+                  ${escapeHtml(post.name)}
+                </div>
+                <div class="post-email">
+                  ${escapeHtml(post.email)}
+                </div>
+              </div>
+
+            </div>
+
+            ${
+              post.image_url
+                ? `
+                  <img
+                    class="post-image"
+                    src="${escapeHtml(post.image_url)}"
+                    alt="تصویر"
+                  >
+                `
+                : ""
+            }
+
+            <div class="post-text">
+              ${escapeHtml(post.text)}
+            </div>
+
+          </div>
+
+          <div class="card card-padding">
+
+            <h3>
+              نظرات 💬
+            </h3>
+
+            ${commentsHtml}
+
+            <div class="divider"></div>
+
+            <form
+              method="POST"
+              action="/comment"
+            >
+
+              <input
+                type="hidden"
+                name="post_id"
+                value="${post.id}"
+              >
+
+              <textarea
+                name="comment"
+                maxlength="2000"
+                placeholder="نظر خود را بنویس..."
+                required
+              ></textarea>
+
+              <button
+                type="submit"
+                class="main-button"
+              >
+                ارسال نظر
+              </button>
+
+            </form>
+
+          </div>
+
+          <a class="back" href="/">
+            بازگشت
+          </a>
+
+        </div>
+
+        ${bottomNav()}
+        `
+      );
+
+      return;
+    }
+
+    // ==================================================
+    // ثبت کامنت
     // ==================================================
 
     if (
       req.method === "POST" &&
-      pathname === "/comment"
+      req.url === "/comment"
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
@@ -1768,30 +1569,28 @@ const server = http.createServer(async (req, res) => {
         (data.get("comment") || "").trim();
 
       if (
-        !Number.isInteger(postId) ||
-        postId <= 0 ||
-        !comment
+        Number.isInteger(postId) &&
+        comment
       ) {
 
-        redirect(res, "/feed");
-
-        return;
+        await pool.query(
+          `
+          INSERT INTO comments
+          (post_id, user_id, comment)
+          VALUES ($1, $2, $3)
+          `,
+          [
+            postId,
+            user.id,
+            comment
+          ]
+        );
       }
 
-      await pool.query(
-        `
-        INSERT INTO comments
-        (user_id, post_id, comment)
-        VALUES ($1, $2, $3)
-        `,
-        [
-          user.id,
-          postId,
-          comment
-        ]
+      redirect(
+        res,
+        `/post?id=${encodeURIComponent(postId)}`
       );
-
-      redirect(res, "/feed");
 
       return;
     }
@@ -1802,101 +1601,70 @@ const server = http.createServer(async (req, res) => {
 
     if (
       req.method === "GET" &&
-      pathname === "/users"
+      req.url === "/users"
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
         return;
       }
 
-      const search =
-        (url.searchParams.get("q") || "").trim();
-
-      let result;
-
-      if (search) {
-
-        result =
-          await pool.query(
-            `
-            SELECT id, name, email
-            FROM users
-            WHERE id <> $1
-              AND (
-                name ILIKE $2
-                OR email ILIKE $2
-              )
-            ORDER BY id ASC
-            `,
-            [
-              user.id,
-              `%${search}%`
-            ]
-          );
-
-      } else {
-
-        result =
-          await pool.query(
-            `
-            SELECT id, name, email
-            FROM users
-            WHERE id <> $1
-            ORDER BY id ASC
-            `,
-            [user.id]
-          );
-      }
+      const usersResult =
+        await pool.query(
+          `
+          SELECT id, name, email
+          FROM users
+          WHERE id <> $1
+          ORDER BY id DESC
+          `,
+          [user.id]
+        );
 
       let usersHtml = "";
 
-      result.rows.forEach(other => {
+      usersResult.rows.forEach(other => {
 
         usersHtml += `
+          <div class="user-card">
 
-        <div class="user-card">
+            <div class="post-header">
 
-          <strong>
-            ${escapeHtml(other.name)}
-          </strong>
+              <div class="avatar">
+                ${escapeHtml(
+                  other.name.charAt(0)
+                )}
+              </div>
 
-          <div class="muted">
-            ${escapeHtml(other.email)}
+              <div>
+
+                <div class="post-name">
+                  ${escapeHtml(other.name)}
+                </div>
+
+                <div class="post-email">
+                  ${escapeHtml(other.email)}
+                </div>
+
+              </div>
+
+            </div>
+
+            <a href="/user?id=${other.id}">
+              <button class="main-button">
+                مشاهده پروفایل
+              </button>
+            </a>
+
           </div>
-
-          <a href="/user?id=${other.id}">
-            <button>
-              مشاهده پروفایل
-            </button>
-          </a>
-
-          <a href="/send-message?to=${other.id}">
-            <button>
-              پیام 💬
-            </button>
-          </a>
-
-        </div>
-
         `;
-
       });
 
       if (!usersHtml) {
-
         usersHtml = `
-        <div class="card center">
-
-          <p>
-            کاربری پیدا نشد.
-          </p>
-
-        </div>
+          <div class="empty">
+            کاربر دیگری وجود ندارد.
+          </div>
         `;
-
       }
 
       sendHtml(
@@ -1904,39 +1672,17 @@ const server = http.createServer(async (req, res) => {
         200,
         "کاربران",
         `
+        <div class="topbar">
+          <h2>کاربران 👥</h2>
+        </div>
 
-        <div class="card">
+        <div class="content">
 
-          <h2>
-            جستجوی کاربران 👥
-          </h2>
-
-          <form method="GET" action="/users">
-
-            <input
-              name="q"
-              value="${escapeHtml(search)}"
-              placeholder="نام یا ایمیل..."
-            >
-
-            <button type="submit">
-              جستجو
-            </button>
-
-          </form>
+          ${usersHtml}
 
         </div>
 
-        ${usersHtml}
-
-        <div class="card center">
-
-          <a href="/">
-            صفحه اصلی
-          </a>
-
-        </div>
-
+        ${bottomNav()}
         `
       );
 
@@ -1944,34 +1690,24 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ==================================================
-    // پروفایل کاربر دیگر
+    // پروفایل کاربر
     // ==================================================
 
     if (
       req.method === "GET" &&
-      pathname === "/user"
+      req.url.startsWith("/user?")
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
         return;
       }
 
-      const targetId =
-        Number(
-          url.searchParams.get("id")
-        );
+      const url =
+        new URL(req.url, "http://localhost");
 
-      if (
-        !Number.isInteger(targetId) ||
-        targetId <= 0
-      ) {
-
-        redirect(res, "/users");
-        return;
-      }
+      const userId =
+        Number(url.searchParams.get("id"));
 
       const targetResult =
         await pool.query(
@@ -1980,7 +1716,7 @@ const server = http.createServer(async (req, res) => {
           FROM users
           WHERE id = $1
           `,
-          [targetId]
+          [userId]
         );
 
       if (targetResult.rows.length === 0) {
@@ -1988,18 +1724,11 @@ const server = http.createServer(async (req, res) => {
         sendHtml(
           res,
           404,
-          "کاربر پیدا نشد",
+          "کاربر",
           `
-          <div class="card center">
-
-            <h2 class="error">
-              کاربر پیدا نشد.
-            </h2>
-
-            <a href="/users">
-              بازگشت
-            </a>
-
+          <div class="content center">
+            <h2>کاربر پیدا نشد.</h2>
+            <a href="/users">بازگشت</a>
           </div>
           `
         );
@@ -2007,10 +1736,29 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const target =
-        targetResult.rows[0];
+      const target = targetResult.rows[0];
 
-      const followResult =
+      const followerResult =
+        await pool.query(
+          `
+          SELECT COUNT(*) AS count
+          FROM follows
+          WHERE following_id = $1
+          `,
+          [target.id]
+        );
+
+      const followingResult =
+        await pool.query(
+          `
+          SELECT COUNT(*) AS count
+          FROM follows
+          WHERE follower_id = $1
+          `,
+          [target.id]
+        );
+
+      const isFollowingResult =
         await pool.query(
           `
           SELECT id
@@ -2024,100 +1772,148 @@ const server = http.createServer(async (req, res) => {
           ]
         );
 
-      const following =
-        followResult.rows.length > 0;
-
-      const followerCount =
+      const postsResult =
         await pool.query(
           `
-          SELECT COUNT(*)
-          FROM follows
-          WHERE following_id = $1
+          SELECT *
+          FROM posts
+          WHERE user_id = $1
+          ORDER BY created_at DESC
           `,
           [target.id]
         );
 
-      const followingCount =
-        await pool.query(
-          `
-          SELECT COUNT(*)
-          FROM follows
-          WHERE follower_id = $1
-          `,
-          [target.id]
-        );
+      let postsHtml = "";
+
+      postsResult.rows.forEach(post => {
+
+        postsHtml += `
+          <div class="card">
+
+            ${
+              post.image_url
+                ? `
+                  <img
+                    class="post-image"
+                    src="${escapeHtml(post.image_url)}"
+                    alt="تصویر"
+                  >
+                `
+                : ""
+            }
+
+            <div class="post-text">
+              ${escapeHtml(post.text)}
+            </div>
+
+            <a href="/post?id=${post.id}">
+              <button class="main-button">
+                💬 مشاهده
+              </button>
+            </a>
+
+          </div>
+        `;
+      });
 
       sendHtml(
         res,
         200,
-        "پروفایل",
+        "پروفایل کاربر",
         `
-
-        <div class="card profile-header">
-
-          <div class="avatar">
-            👤
-          </div>
-
-          <h2>
-            ${escapeHtml(target.name)}
-          </h2>
-
-          <p class="muted">
-            ${escapeHtml(target.email)}
-          </p>
-
-          <p>
-            دنبال‌کننده:
-            ${escapeHtml(followerCount.rows[0].count)}
-            |
-            دنبال‌شونده:
-            ${escapeHtml(followingCount.rows[0].count)}
-          </p>
-
-          ${
-            target.id !== user.id
-              ? `
-                <form
-                  method="POST"
-                  action="/follow"
-                >
-
-                  <input
-                    type="hidden"
-                    name="target_id"
-                    value="${target.id}"
-                  >
-
-                  <button type="submit">
-                    ${
-                      following
-                        ? "لغو دنبال کردن"
-                        : "دنبال کردن"
-                    }
-                  </button>
-
-                </form>
-
-                <a href="/send-message?to=${target.id}">
-                  <button>
-                    ارسال پیام 💬
-                  </button>
-                </a>
-              `
-              : ""
-          }
-
+        <div class="topbar">
+          <h2>پروفایل 👤</h2>
         </div>
 
-        <div class="card center">
+        <div class="content">
 
-          <a href="/users">
+          <div class="card card-padding center">
+
+            <div
+              class="avatar"
+              style="
+                margin:auto;
+                width:70px;
+                height:70px;
+                font-size:25px;
+              "
+            >
+              ${escapeHtml(
+                target.name.charAt(0)
+              )}
+            </div>
+
+            <h2>
+              ${escapeHtml(target.name)}
+            </h2>
+
+            <p class="muted">
+              ${escapeHtml(target.email)}
+            </p>
+
+            <p>
+              دنبال‌کننده:
+              ${followerResult.rows[0].count}
+            </p>
+
+            <p>
+              دنبال‌شونده:
+              ${followingResult.rows[0].count}
+            </p>
+
+            ${
+              target.id !== user.id
+                ? `
+                  <form
+                    method="POST"
+                    action="/follow"
+                  >
+
+                    <input
+                      type="hidden"
+                      name="user_id"
+                      value="${target.id}"
+                    >
+
+                    <button
+                      type="submit"
+                      class="${
+                        isFollowingResult.rows.length
+                          ? "red"
+                          : "blue"
+                      }"
+                    >
+                      ${
+                        isFollowingResult.rows.length
+                          ? "لغو دنبال کردن"
+                          : "دنبال کردن"
+                      }
+                    </button>
+
+                  </form>
+                `
+                : ""
+            }
+
+          </div>
+
+          <h3>
+            پست‌ها
+          </h3>
+
+          ${postsHtml || `
+            <div class="empty">
+              هنوز پستی منتشر نشده است.
+            </div>
+          `}
+
+          <a class="back" href="/users">
             بازگشت به کاربران
           </a>
 
         </div>
 
+        ${bottomNav()}
         `
       );
 
@@ -2130,10 +1926,8 @@ const server = http.createServer(async (req, res) => {
 
     if (
       req.method === "POST" &&
-      pathname === "/follow"
+      req.url === "/follow"
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
@@ -2143,16 +1937,13 @@ const server = http.createServer(async (req, res) => {
       const data = await readBody(req);
 
       const targetId =
-        Number(data.get("target_id"));
+        Number(data.get("user_id"));
 
       if (
         !Number.isInteger(targetId) ||
-        targetId <= 0 ||
         targetId === user.id
       ) {
-
         redirect(res, "/users");
-
         return;
       }
 
@@ -2170,7 +1961,7 @@ const server = http.createServer(async (req, res) => {
           ]
         );
 
-      if (existing.rows.length > 0) {
+      if (existing.rows.length) {
 
         await pool.query(
           `
@@ -2209,40 +2000,75 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ==================================================
-    // جستجوی کار
+    // جستجو
     // ==================================================
 
     if (
       req.method === "GET" &&
-      pathname === "/jobs"
+      req.url.startsWith("/search")
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
         return;
       }
 
-      const search =
-        (url.searchParams.get("q") || "").trim();
+      const url =
+        new URL(req.url, "http://localhost");
 
-      let result;
+      const q =
+        (url.searchParams.get("q") || "")
+          .trim();
 
-      if (search) {
+      let usersHtml = "";
+      let jobsHtml = "";
+      let postsHtml = "";
 
-        result =
+      if (q) {
+
+        const usersResult =
+          await pool.query(
+            `
+            SELECT id, name, email
+            FROM users
+            WHERE
+              name ILIKE $1
+              OR email ILIKE $1
+            ORDER BY id DESC
+            LIMIT 20
+            `,
+            [`%${q}%`]
+          );
+
+        usersResult.rows.forEach(item => {
+
+          usersHtml += `
+            <div class="user-card">
+
+              <strong>
+                ${escapeHtml(item.name)}
+              </strong>
+
+              <div class="muted">
+                ${escapeHtml(item.email)}
+              </div>
+
+              <a href="/user?id=${item.id}">
+                <button>
+                  پروفایل
+                </button>
+              </a>
+
+            </div>
+          `;
+        });
+
+        const jobsResult =
           await pool.query(
             `
             SELECT
-              jobs.id,
-              jobs.title,
-              jobs.city,
-              jobs.salary,
-              jobs.description,
-              jobs.created_at,
-              users.name,
-              users.email
+              jobs.*,
+              users.name AS owner_name
             FROM jobs
             INNER JOIN users
               ON users.id = jobs.user_id
@@ -2251,140 +2077,164 @@ const server = http.createServer(async (req, res) => {
               OR jobs.city ILIKE $1
               OR jobs.description ILIKE $1
             ORDER BY jobs.created_at DESC
+            LIMIT 30
             `,
-            [`%${search}%`]
+            [`%${q}%`]
           );
 
-      } else {
+        jobsResult.rows.forEach(job => {
 
-        result =
+          jobsHtml += `
+            <div class="job-card">
+
+              <div class="job-title">
+                ${escapeHtml(job.title)}
+              </div>
+
+              <div class="job-city">
+                📍 ${escapeHtml(job.city)}
+              </div>
+
+              <div class="job-salary">
+                💰 ${escapeHtml(job.salary)}
+              </div>
+
+              <p>
+                ${escapeHtml(job.description)}
+              </p>
+
+              <div class="muted">
+                آگهی‌دهنده:
+                ${escapeHtml(job.owner_name)}
+              </div>
+
+            </div>
+          `;
+        });
+
+        const postsResult =
           await pool.query(
             `
             SELECT
-              jobs.id,
-              jobs.title,
-              jobs.city,
-              jobs.salary,
-              jobs.description,
-              jobs.created_at,
-              users.name,
-              users.email
-            FROM jobs
+              posts.id,
+              posts.text,
+              posts.image_url,
+              users.name
+            FROM posts
             INNER JOIN users
-              ON users.id = jobs.user_id
-            ORDER BY jobs.created_at DESC
-            `
+              ON users.id = posts.user_id
+            WHERE
+              posts.text ILIKE $1
+              OR users.name ILIKE $1
+            ORDER BY posts.created_at DESC
+            LIMIT 30
+            `,
+            [`%${q}%`]
           );
-      }
 
-      let jobsHtml = "";
+        postsResult.rows.forEach(post => {
 
-      result.rows.forEach(job => {
+          postsHtml += `
+            <div class="card">
 
-        jobsHtml += `
+              <div class="post-header">
 
-        <div class="job-card">
+                <div class="avatar">
+                  ${escapeHtml(
+                    post.name.charAt(0)
+                  )}
+                </div>
 
-          <div class="job-title">
-            ${escapeHtml(job.title)}
-          </div>
+                <strong>
+                  ${escapeHtml(post.name)}
+                </strong>
 
-          <div class="job-city">
-            📍 شهر:
-            ${escapeHtml(job.city)}
-          </div>
+              </div>
 
-          <div class="job-salary">
-            💰 حقوق:
-            ${escapeHtml(job.salary)}
-          </div>
+              <div class="post-text">
+                ${escapeHtml(post.text)}
+              </div>
 
-          <div class="post-text">
-            ${escapeHtml(job.description)}
-          </div>
+              <a href="/post?id=${post.id}">
+                <button class="main-button">
+                  مشاهده پست
+                </button>
+              </a>
 
-          <div class="muted">
-            ثبت توسط:
-            ${escapeHtml(job.name)}
-          </div>
-
-          <div class="muted">
-            ${escapeHtml(formatDate(job.created_at))}
-          </div>
-
-          <a href="/send-message?to=${job.user_id}">
-            <button>
-              تماس با آگهی‌دهنده 💬
-            </button>
-          </a>
-
-        </div>
-
-        `;
-
-      });
-
-      if (!jobsHtml) {
-
-        jobsHtml = `
-        <div class="card center">
-
-          <p>
-            آگهی کاری پیدا نشد.
-          </p>
-
-        </div>
-        `;
-
+            </div>
+          `;
+        });
       }
 
       sendHtml(
         res,
         200,
-        "جستجوی کار",
+        "جستجو",
         `
+        <div class="topbar">
+          <h2>جستجو 🔎</h2>
+        </div>
 
-        <div class="card">
+        <div class="content">
 
-          <h2>
-            جستجوی کار 🔎
-          </h2>
-
-          <form
-            method="GET"
-            action="/jobs"
-          >
+          <form method="GET" action="/search">
 
             <input
               name="q"
-              value="${escapeHtml(search)}"
-              placeholder="عنوان شغل، شهر یا توضیحات..."
+              value="${escapeHtml(q)}"
+              placeholder="نام کاربر، شغل یا موضوع..."
+              required
             >
 
-            <button type="submit">
-              جستجو
+            <button
+              type="submit"
+              class="main-button blue"
+            >
+              جستجو 🔎
             </button>
 
           </form>
 
-          <a href="/create-job">
-            <button class="main-button">
-              ثبت آگهی کار ➕
-            </button>
-          </a>
+          ${
+            q
+              ? `
+                <div class="divider"></div>
+
+                <h3>👥 کاربران</h3>
+
+                ${
+                  usersHtml ||
+                  `<div class="empty">کاربری پیدا نشد.</div>`
+                }
+
+                <div class="divider"></div>
+
+                <h3>💼 فرصت‌های شغلی</h3>
+
+                ${
+                  jobsHtml ||
+                  `<div class="empty">آگهی کاری پیدا نشد.</div>`
+                }
+
+                <div class="divider"></div>
+
+                <h3>📱 پست‌ها</h3>
+
+                ${
+                  postsHtml ||
+                  `<div class="empty">پستی پیدا نشد.</div>`
+                }
+              `
+              : `
+                <div class="empty">
+                  نام کاربر، شغل یا موضوع موردنظر را جستجو کن.
+                </div>
+              `
+          }
 
         </div>
 
-        ${jobsHtml}
-
-        <div class="card center">
-
-          <a href="/">
-            صفحه اصلی
-          </a>
-
-        </div>
-
+        ${bottomNav()}
         `
       );
 
@@ -2397,10 +2247,8 @@ const server = http.createServer(async (req, res) => {
 
     if (
       req.method === "GET" &&
-      pathname === "/create-job"
+      req.url === "/create-job"
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
@@ -2412,65 +2260,65 @@ const server = http.createServer(async (req, res) => {
         200,
         "ثبت آگهی کار",
         `
+        <div class="topbar">
+          <h2>ثبت آگهی کار 💼</h2>
+        </div>
 
-        <div class="card">
+        <div class="content">
 
-          <h2>
-            ثبت آگهی کار ➕
-          </h2>
+          <div class="card card-padding">
 
-          <p class="muted">
-            آگهی شما در بخش جستجوی کار نمایش داده می‌شود.
-          </p>
-
-          <form
-            method="POST"
-            action="/create-job"
-          >
-
-            <input
-              name="title"
-              placeholder="عنوان شغل"
-              maxlength="200"
-              required
+            <form
+              method="POST"
+              action="/create-job"
             >
 
-            <input
-              name="city"
-              placeholder="شهر"
-              maxlength="100"
-              required
-            >
+              <input
+                name="title"
+                placeholder="عنوان شغل"
+                maxlength="200"
+                required
+              >
 
-            <input
-              name="salary"
-              placeholder="حقوق یا دستمزد، مثلاً توافقی"
-              maxlength="200"
-              required
-            >
+              <input
+                name="city"
+                placeholder="شهر"
+                maxlength="100"
+                required
+              >
 
-            <textarea
-              name="description"
-              placeholder="توضیحات کامل درباره کار..."
-              maxlength="5000"
-              required
-            ></textarea>
+              <input
+                name="salary"
+                placeholder="حقوق یا دستمزد، مثلاً توافقی"
+                maxlength="200"
+                required
+              >
 
-            <button
-              type="submit"
-              class="main-button"
-            >
-              ثبت آگهی
-            </button>
+              <textarea
+                name="description"
+                placeholder="توضیحات کامل درباره کار..."
+                maxlength="5000"
+                required
+              ></textarea>
 
-          </form>
+              <button
+                type="submit"
+                class="main-button green"
+              >
+                ثبت آگهی 💼
+              </button>
 
-          <a href="/jobs">
-            بازگشت به جستجوی کار
+            </form>
+
+          </div>
+
+          <a class="back" href="/jobs">
+            مشاهده آگهی‌های کار
           </a>
 
         </div>
 
+        ${bottomNav()}
         `
       );
 
@@ -2479,10 +2327,8 @@ const server = http.createServer(async (req, res) => {
 
     if (
       req.method === "POST" &&
-      pathname === "/create-job"
+      req.url === "/create-job"
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
@@ -2515,7 +2361,7 @@ const server = http.createServer(async (req, res) => {
           400,
           "خطا",
           `
-          <div class="card center">
+          <div class="content center">
 
             <h2 class="error">
               همه قسمت‌ها را کامل کن.
@@ -2560,15 +2406,144 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ==================================================
+    // آگهی‌های کار
+    // ==================================================
+
+    if (
+      req.method === "GET" &&
+      req.url === "/jobs"
+    ) {
+
+      if (!user) {
+        redirect(res, "/login");
+        return;
+      }
+
+      const jobsResult =
+        await pool.query(
+          `
+          SELECT
+            jobs.*,
+            users.name AS owner_name,
+            users.email AS owner_email
+          FROM jobs
+          INNER JOIN users
+            ON users.id = jobs.user_id
+          ORDER BY jobs.created_at DESC
+          LIMIT 100
+          `
+        );
+
+      let jobsHtml = "";
+
+      jobsResult.rows.forEach(job => {
+
+        jobsHtml += `
+          <div class="job-card">
+
+            <div class="job-title">
+              ${escapeHtml(job.title)}
+            </div>
+
+            <div class="job-city">
+              📍 ${escapeHtml(job.city)}
+            </div>
+
+            <div class="job-salary">
+              💰 ${escapeHtml(job.salary)}
+            </div>
+
+            <p>
+              ${escapeHtml(job.description)}
+            </p>
+
+            <div class="muted">
+              منتشرکننده:
+              ${escapeHtml(job.owner_name)}
+            </div>
+
+            ${
+              job.user_id !== user.id
+                ? `
+                  <a href="/send-message?to=${job.user_id}">
+                    <button class="main-button blue">
+                      💬 تماس با آگهی‌دهنده
+                    </button>
+                  </a>
+                `
+                : `
+                  <div class="muted">
+                    این آگهی توسط شما ثبت شده است.
+                  </div>
+                `
+            }
+
+          </div>
+        `;
+      });
+
+      sendHtml(
+        res,
+        200,
+        "جستجوی کار",
+        `
+        <div class="topbar">
+          <h2>جستجوی کار 🔎</h2>
+        </div>
+
+        <div class="content">
+
+          <a href="/create-job">
+            <button class="main-button green">
+              ➕ ثبت آگهی کار
+            </button>
+          </a>
+
+          <form method="GET" action="/search">
+
+            <input
+              name="q"
+              placeholder="جستجوی شغل یا شهر..."
+              required
+            >
+
+            <button
+              type="submit"
+              class="main-button"
+            >
+              جستجو
+            </button>
+
+          </form>
+
+          <div class="divider"></div>
+
+          ${
+            jobsHtml ||
+            `
+            <div class="empty">
+              هنوز آگهی کاری ثبت نشده است.
+            </div>
+            `
+          }
+
+        </div>
+
+        ${bottomNav()}
+        `
+      );
+
+      return;
+    }
+
+    // ==================================================
     // پیام‌ها
     // ==================================================
 
     if (
       req.method === "GET" &&
-      pathname === "/messages"
+      req.url === "/messages"
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
@@ -2591,71 +2566,55 @@ const server = http.createServer(async (req, res) => {
       usersResult.rows.forEach(other => {
 
         usersHtml += `
+          <div class="user-card">
 
-        <div class="user-card">
+            <strong>
+              ${escapeHtml(other.name)}
+            </strong>
 
-          <strong>
-            ${escapeHtml(other.name)}
-          </strong>
+            <div class="muted">
+              ${escapeHtml(other.email)}
+            </div>
 
-          <div class="muted">
-            ${escapeHtml(other.email)}
+            <a
+              href="/send-message?to=${other.id}"
+            >
+              <button class="main-button">
+                باز کردن گفتگو 💬
+              </button>
+            </a>
+
           </div>
-
-          <a href="/send-message?to=${other.id}">
-            <button>
-              باز کردن گفتگو 💬
-            </button>
-          </a>
-
-        </div>
-
         `;
-
       });
-
-      if (!usersHtml) {
-
-        usersHtml = `
-        <div class="card center">
-
-          <p>
-            کاربر دیگری وجود ندارد.
-          </p>
-
-        </div>
-        `;
-
-      }
 
       sendHtml(
         res,
         200,
         "پیام‌ها",
         `
+        <div class="topbar">
+          <h2>پیام‌ها 💬</h2>
+        </div>
 
-        <div class="card">
-
-          <h2>
-            پیام‌ها 💬
-          </h2>
+        <div class="content">
 
           <h3>
             کاربران
           </h3>
 
-          ${usersHtml}
+          ${
+            usersHtml ||
+            `
+            <div class="empty">
+              کاربر دیگری وجود ندارد.
+            </div>
+            `
+          }
 
         </div>
 
-        <div class="card center">
-
-          <a href="/">
-            صفحه اصلی
-          </a>
-
-        </div>
-
+        ${bottomNav()}
         `
       );
 
@@ -2668,20 +2627,19 @@ const server = http.createServer(async (req, res) => {
 
     if (
       req.method === "GET" &&
-      pathname === "/send-message"
+      req.url.startsWith("/send-message")
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
         return;
       }
 
+      const url =
+        new URL(req.url, "http://localhost");
+
       const receiverId =
-        Number(
-          url.searchParams.get("to")
-        );
+        Number(url.searchParams.get("to"));
 
       if (
         !Number.isInteger(receiverId) ||
@@ -2690,7 +2648,6 @@ const server = http.createServer(async (req, res) => {
       ) {
 
         redirect(res, "/messages");
-
         return;
       }
 
@@ -2707,7 +2664,6 @@ const server = http.createServer(async (req, res) => {
       if (receiverResult.rows.length === 0) {
 
         redirect(res, "/messages");
-
         return;
       }
 
@@ -2718,6 +2674,7 @@ const server = http.createServer(async (req, res) => {
         await pool.query(
           `
           SELECT
+            messages.id,
             messages.message,
             messages.created_at,
             messages.sender_id,
@@ -2747,104 +2704,97 @@ const server = http.createServer(async (req, res) => {
 
       messagesResult.rows.forEach(message => {
 
-        const className =
+        const cls =
           message.sender_id === user.id
-            ? "message-sent"
-            : "message-received";
+            ? "sent"
+            : "received";
 
         conversationHtml += `
+          <div class="message ${cls}">
 
-        <div class="message-card ${className}">
+            <strong>
+              ${escapeHtml(message.sender_name)}
+            </strong>
 
-          <strong>
-            ${escapeHtml(message.sender_name)}
-          </strong>
+            <div>
+              ${escapeHtml(message.message)}
+            </div>
 
-          <div class="post-text">
-            ${escapeHtml(message.message)}
+            <div class="muted">
+              ${escapeHtml(
+                new Date(
+                  message.created_at
+                ).toLocaleString("fa-IR")
+              )}
+            </div>
+
           </div>
-
-          <div class="muted">
-            ${escapeHtml(formatDate(message.created_at))}
-          </div>
-
-        </div>
-
         `;
-
       });
 
       if (!conversationHtml) {
-
         conversationHtml = `
-        <div class="card center">
-
-          <p>
+          <div class="empty">
             هنوز پیامی در این گفتگو وجود ندارد.
-          </p>
-
-        </div>
+          </div>
         `;
-
       }
 
       sendHtml(
         res,
         200,
-        "گفتگو",
+        "گفت‌وگو",
         `
-
-        <div class="card">
-
+        <div class="topbar">
           <h2>
             گفت‌وگو با
             ${escapeHtml(receiver.name)}
             💬
           </h2>
-
-          <p class="muted">
-            ${escapeHtml(receiver.email)}
-          </p>
-
         </div>
 
-        ${conversationHtml}
+        <div class="content">
 
-        <div class="card">
+          ${conversationHtml}
 
-          <form
-            method="POST"
-            action="/send-message"
-          >
+          <div class="card card-padding">
 
-            <input
-              type="hidden"
-              name="receiver_id"
-              value="${receiver.id}"
+            <form
+              method="POST"
+              action="/send-message"
             >
 
-            <textarea
-              name="message"
-              placeholder="پیام خود را بنویس..."
-              maxlength="5000"
-              required
-            ></textarea>
+              <input
+                type="hidden"
+                name="receiver_id"
+                value="${receiver.id}"
+              >
 
-            <button
-              type="submit"
-              class="main-button"
-            >
-              ارسال پیام 📤
-            </button>
+              <textarea
+                name="message"
+                maxlength="5000"
+                placeholder="پیام خود را بنویس..."
+                required
+              ></textarea>
 
-          </form>
+              <button
+                type="submit"
+                class="main-button blue"
+              >
+                ارسال پیام 📤
+              </button>
 
-          <a href="/messages">
+            </form>
+
+          </div>
+
+          <a class="back" href="/messages">
             بازگشت به پیام‌ها
           </a>
 
         </div>
 
+        ${bottomNav()}
         `
       );
 
@@ -2857,10 +2807,8 @@ const server = http.createServer(async (req, res) => {
 
     if (
       req.method === "POST" &&
-      pathname === "/send-message"
+      req.url === "/send-message"
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
@@ -2870,59 +2818,36 @@ const server = http.createServer(async (req, res) => {
       const data = await readBody(req);
 
       const receiverId =
-        Number(
-          data.get("receiver_id")
-        );
+        Number(data.get("receiver_id"));
 
       const message =
         (data.get("message") || "").trim();
 
       if (
-        !Number.isInteger(receiverId) ||
-        receiverId <= 0 ||
-        receiverId === user.id ||
-        !message
+        Number.isInteger(receiverId) &&
+        receiverId > 0 &&
+        receiverId !== user.id &&
+        message
       ) {
 
-        redirect(res, "/messages");
-
-        return;
-      }
-
-      const receiverResult =
         await pool.query(
           `
-          SELECT id
-          FROM users
-          WHERE id = $1
+          INSERT INTO messages
+          (
+            sender_id,
+            receiver_id,
+            message
+          )
+          VALUES
+          ($1, $2, $3)
           `,
-          [receiverId]
+          [
+            user.id,
+            receiverId,
+            message
+          ]
         );
-
-      if (receiverResult.rows.length === 0) {
-
-        redirect(res, "/messages");
-
-        return;
       }
-
-      await pool.query(
-        `
-        INSERT INTO messages
-        (
-          sender_id,
-          receiver_id,
-          message
-        )
-        VALUES
-        ($1, $2, $3)
-        `,
-        [
-          user.id,
-          receiverId,
-          message
-        ]
-      );
 
       redirect(
         res,
@@ -2938,88 +2863,181 @@ const server = http.createServer(async (req, res) => {
 
     if (
       req.method === "GET" &&
-      pathname === "/profile"
+      req.url === "/profile"
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
         return;
       }
 
-      const followers =
+      const followerResult =
         await pool.query(
           `
-          SELECT COUNT(*)
+          SELECT COUNT(*) AS count
           FROM follows
           WHERE following_id = $1
           `,
           [user.id]
         );
 
-      const following =
+      const followingResult =
         await pool.query(
           `
-          SELECT COUNT(*)
+          SELECT COUNT(*) AS count
           FROM follows
           WHERE follower_id = $1
           `,
           [user.id]
         );
 
-      const posts =
+      const postsResult =
         await pool.query(
           `
-          SELECT COUNT(*)
+          SELECT *
           FROM posts
           WHERE user_id = $1
+          ORDER BY created_at DESC
           `,
           [user.id]
         );
+
+      let postsHtml = "";
+
+      postsResult.rows.forEach(post => {
+
+        postsHtml += `
+          <div class="card">
+
+            ${
+              post.image_url
+                ? `
+                  <img
+                    class="post-image"
+                    src="${escapeHtml(post.image_url)}"
+                    alt="تصویر"
+                  >
+                `
+                : ""
+            }
+
+            <div class="post-text">
+              ${escapeHtml(post.text)}
+            </div>
+
+            <a href="/post?id=${post.id}">
+              <button class="main-button">
+                💬 مشاهده پست
+              </button>
+            </a>
+
+          </div>
+        `;
+      });
 
       sendHtml(
         res,
         200,
         "پروفایل",
         `
+        <div class="topbar">
+          <h2>پروفایل 👤</h2>
+        </div>
 
-        <div class="card profile-header">
+        <div class="content">
 
-          <div class="avatar">
-            👤
+          <div class="card card-padding center">
+
+            <div
+              class="avatar"
+              style="
+                margin:auto;
+                width:75px;
+                height:75px;
+                font-size:28px;
+              "
+            >
+              ${escapeHtml(
+                user.name.charAt(0)
+              )}
+            </div>
+
+            <h2>
+              ${escapeHtml(user.name)}
+            </h2>
+
+            <p class="muted">
+              ${escapeHtml(user.email)}
+            </p>
+
+            <p>
+              دنبال‌کننده:
+              ${followerResult.rows[0].count}
+            </p>
+
+            <p>
+              دنبال‌شونده:
+              ${followingResult.rows[0].count}
+            </p>
+
+            <a href="/edit-profile">
+              <button>
+                ویرایش پروفایل ✏️
+              </button>
+            </a>
+
           </div>
 
-          <h2>
-            ${escapeHtml(user.name)}
-          </h2>
+          <h3>
+            پست‌های من 📱
+          </h3>
 
-          <p>
-            ${escapeHtml(user.email)}
-          </p>
-
-          <p>
-            پست‌ها:
-            ${escapeHtml(posts.rows[0].count)}
-            |
-            دنبال‌کننده:
-            ${escapeHtml(followers.rows[0].count)}
-            |
-            دنبال‌شونده:
-            ${escapeHtml(following.rows[0].count)}
-          </p>
+          ${
+            postsHtml ||
+            `
+            <div class="empty">
+              هنوز پستی منتشر نکرده‌ای.
+            </div>
+            `
+          }
 
         </div>
 
-        <div class="card">
+        ${bottomNav()}
+        `
+      );
 
-          <h3>
+      return;
+    }
+
+    // ==================================================
+    // ویرایش پروفایل
+    // ==================================================
+
+    if (
+      req.method === "GET" &&
+      req.url === "/edit-profile"
+    ) {
+
+      if (!user) {
+        redirect(res, "/login");
+        return;
+      }
+
+      sendHtml(
+        res,
+        200,
+        "ویرایش پروفایل",
+        `
+        <div class="content">
+
+          <h2 class="center">
             ویرایش پروفایل ✏️
-          </h3>
+          </h2>
 
           <form
             method="POST"
-            action="/profile"
+            action="/edit-profile"
           >
 
             <input
@@ -3046,32 +3064,21 @@ const server = http.createServer(async (req, res) => {
 
           </form>
 
-        </div>
-
-        <div class="card center">
-
-          <a href="/">
-            صفحه اصلی
+          <a class="back" href="/profile">
+            بازگشت
           </a>
 
         </div>
-
         `
       );
 
       return;
     }
 
-    // ==================================================
-    // ذخیره پروفایل
-    // ==================================================
-
     if (
       req.method === "POST" &&
-      pathname === "/profile"
+      req.url === "/edit-profile"
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
@@ -3090,8 +3097,7 @@ const server = http.createServer(async (req, res) => {
 
       if (!name || !email) {
 
-        redirect(res, "/profile");
-
+        redirect(res, "/edit-profile");
         return;
       }
 
@@ -3116,7 +3122,7 @@ const server = http.createServer(async (req, res) => {
           200,
           "پروفایل",
           `
-          <div class="card center">
+          <div class="content center">
 
             <h2 class="success">
               تغییرات ذخیره شد ✅
@@ -3132,49 +3138,26 @@ const server = http.createServer(async (req, res) => {
 
       } catch (error) {
 
-        console.error(
-          "Profile error:",
-          error
+        console.error(error);
+
+        sendHtml(
+          res,
+          400,
+          "خطا",
+          `
+          <div class="content center">
+
+            <h2 class="error">
+              این ایمیل قبلاً استفاده شده است.
+            </h2>
+
+            <a href="/edit-profile">
+              بازگشت
+            </a>
+
+          </div>
+          `
         );
-
-        if (error.code === "23505") {
-
-          sendHtml(
-            res,
-            400,
-            "خطا",
-            `
-            <div class="card center">
-
-              <h2 class="error">
-                این ایمیل قبلاً استفاده شده است.
-              </h2>
-
-              <a href="/profile">
-                بازگشت
-              </a>
-
-            </div>
-            `
-          );
-
-        } else {
-
-          sendHtml(
-            res,
-            500,
-            "خطا",
-            `
-            <div class="card center">
-
-              <h2 class="error">
-                ذخیره تغییرات انجام نشد.
-              </h2>
-
-            </div>
-            `
-          );
-        }
       }
 
       return;
@@ -3186,10 +3169,8 @@ const server = http.createServer(async (req, res) => {
 
     if (
       req.method === "GET" &&
-      pathname === "/settings"
+      req.url === "/settings"
     ) {
-
-      const user = await getSession(req);
 
       if (!user) {
         redirect(res, "/login");
@@ -3201,41 +3182,39 @@ const server = http.createServer(async (req, res) => {
         200,
         "تنظیمات",
         `
+        <div class="topbar">
+          <h2>تنظیمات ⚙️</h2>
+        </div>
 
-        <div class="card">
+        <div class="content">
 
-          <h2>
-            تنظیمات ⚙️
-          </h2>
+          <div class="card card-padding">
 
-          <div class="info-box">
+            <h3>
+              حساب شما فعال است ✅
+            </h3>
 
-            <p class="success">
-              حساب شما فعال است. ✅
-            </p>
-
-            <p>
-              نام:
-              ${escapeHtml(user.name)}
-            </p>
-
-            <p>
-              ایمیل:
+            <p class="muted">
               ${escapeHtml(user.email)}
             </p>
 
           </div>
 
-        </div>
+          <a href="/edit-profile">
+            <button class="main-button">
+              ویرایش حساب
+            </button>
+          </a>
 
-        <div class="card center">
-
-          <a href="/">
-            صفحه اصلی
+          <a href="/logout">
+            <button class="main-button red">
+              خروج
+            </button>
           </a>
 
         </div>
 
+        ${bottomNav()}
         `
       );
 
@@ -3248,17 +3227,10 @@ const server = http.createServer(async (req, res) => {
 
     if (
       req.method === "GET" &&
-      pathname === "/logout"
+      req.url === "/logout"
     ) {
 
-      try {
-        await deleteSession(req);
-      } catch (error) {
-        console.error(
-          "Logout error:",
-          error
-        );
-      }
+      await deleteSession(req);
 
       const cookie =
         "sessionId=; " +
@@ -3267,11 +3239,7 @@ const server = http.createServer(async (req, res) => {
         "Max-Age=0; " +
         "SameSite=Lax";
 
-      redirect(
-        res,
-        "/",
-        cookie
-      );
+      redirect(res, "/", cookie);
 
       return;
     }
@@ -3283,30 +3251,26 @@ const server = http.createServer(async (req, res) => {
     sendHtml(
       res,
       404,
-      "صفحه پیدا نشد",
+      "یافت نشد",
       `
-
-      <div class="card center">
+      <div class="content center">
 
         <h2>
           صفحه پیدا نشد
         </h2>
 
         <a href="/">
-          <button>
-            صفحه اصلی
-          </button>
+          بازگشت به صفحه اصلی
         </a>
 
       </div>
-
       `
     );
 
   } catch (error) {
 
     console.error(
-      "Server error:",
+      "SERVER ERROR:",
       error
     );
 
@@ -3315,8 +3279,7 @@ const server = http.createServer(async (req, res) => {
       500,
       "خطای سرور",
       `
-
-      <div class="card center">
+      <div class="content center">
 
         <h2 class="error">
           خطای سرور
@@ -3331,16 +3294,15 @@ const server = http.createServer(async (req, res) => {
         </a>
 
       </div>
-
       `
     );
   }
 
 });
 
-// ======================================================
-// اجرای برنامه
-// ======================================================
+// ==================================================
+// شروع برنامه
+// ==================================================
 
 createTables()
   .then(() => {
