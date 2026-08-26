@@ -9,48 +9,180 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// ذخیره ورود کاربران
-const sessions = new Map();
+// ===============================
+// ابزارهای کمکی
+// ===============================
 
 function hashPassword(password) {
-  return crypto.createHash("sha256").update(password).digest("hex");
+  return crypto
+    .createHash("sha256")
+    .update(password)
+    .digest("hex");
 }
 
-function createSession(user) {
-  const sessionId = crypto.randomBytes(32).toString("hex");
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
 
-  sessions.set(sessionId, {
-    id: user.id,
-    name: user.name,
-    email: user.email
+function parseCookies(req) {
+  const cookies = {};
+  const header = req.headers.cookie || "";
+
+  header.split(";").forEach(part => {
+    const index = part.indexOf("=");
+
+    if (index === -1) {
+      return;
+    }
+
+    const key = part.slice(0, index).trim();
+    const value = part.slice(index + 1).trim();
+
+    cookies[key] = decodeURIComponent(value);
   });
+
+  return cookies;
+}
+
+function createSessionId() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+async function createSession(userId) {
+  const sessionId = createSessionId();
+
+  await pool.query(
+    `
+    INSERT INTO sessions (session_id, user_id)
+    VALUES ($1, $2)
+    `,
+    [sessionId, userId]
+  );
 
   return sessionId;
 }
 
-function getSession(req) {
-  const cookie = req.headers.cookie || "";
+async function getSession(req) {
+  const cookies = parseCookies(req);
+  const sessionId = cookies.sessionId;
 
-  const match = cookie.match(/sessionId=([^;]+)/);
-
-  if (!match) {
+  if (!sessionId) {
     return null;
   }
 
-  return sessions.get(match[1]) || null;
+  const result = await pool.query(
+    `
+    SELECT
+      users.id,
+      users.name,
+      users.email
+    FROM sessions
+    INNER JOIN users
+      ON users.id = sessions.user_id
+    WHERE sessions.session_id = $1
+    `,
+    [sessionId]
+  );
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return result.rows[0];
 }
+
+async function deleteSession(req) {
+  const cookies = parseCookies(req);
+  const sessionId = cookies.sessionId;
+
+  if (!sessionId) {
+    return;
+  }
+
+  await pool.query(
+    `
+    DELETE FROM sessions
+    WHERE session_id = $1
+    `,
+    [sessionId]
+  );
+}
+
+function sendHtml(res, statusCode, title, content) {
+  res.writeHead(statusCode, {
+    "Content-Type": "text/html; charset=utf-8"
+  });
+
+  res.end(html(title, content));
+}
+
+function redirect(res, location, cookie) {
+  const headers = {
+    "Location": location
+  };
+
+  if (cookie) {
+    headers["Set-Cookie"] = cookie;
+  }
+
+  res.writeHead(302, headers);
+  res.end();
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+
+    req.on("data", chunk => {
+      body += chunk;
+
+      // جلوگیری از درخواست‌های بسیار بزرگ
+      if (body.length > 1024 * 1024) {
+        req.destroy();
+        reject(new Error("Request body too large"));
+      }
+    });
+
+    req.on("end", () => {
+      resolve(new URLSearchParams(body));
+    });
+
+    req.on("error", reject);
+  });
+}
+
+// ===============================
+// قالب HTML
+// ===============================
 
 function html(title, content) {
   return `
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <title>${title}</title>
+<head>
+
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <meta
+    name="description"
+    content="برنامه اجتماعی من"
+  >
+
+  <title>${escapeHtml(title)}</title>
 
   <style>
+
     * {
       box-sizing: border-box;
     }
@@ -58,11 +190,17 @@ function html(title, content) {
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: Arial, sans-serif;
+      font-family:
+        Arial,
+        Tahoma,
+        sans-serif;
+
       background: #f2f4f7;
+
       display: flex;
       justify-content: center;
       align-items: center;
+
       padding: 20px;
     }
 
@@ -70,69 +208,109 @@ function html(title, content) {
       width: 100%;
       max-width: 420px;
       min-height: 650px;
+
       background: white;
+
       border-radius: 28px;
+
       padding: 30px 22px;
-      box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+
+      box-shadow:
+        0 8px 30px rgba(0,0,0,0.15);
+
       text-align: center;
     }
 
-    h1, h2, h3 {
+    h1,
+    h2,
+    h3 {
       margin-top: 10px;
+    }
+
+    p {
+      line-height: 1.8;
     }
 
     input {
       width: 100%;
+
       padding: 13px;
+
       margin: 7px 0;
-      border: 1px solid #ccc;
+
+      border:
+        1px solid #ccc;
+
       border-radius: 10px;
+
       font-size: 16px;
     }
 
     button {
       border: none;
+
       border-radius: 10px;
+
       padding: 12px 18px;
+
       margin: 6px;
+
       font-size: 15px;
+
       cursor: pointer;
+
       background: #222;
+
       color: white;
+    }
+
+    button:hover {
+      opacity: 0.9;
     }
 
     .main-button {
       width: 90%;
+
       margin: 10px auto;
+
       display: block;
     }
 
     .menu-button {
       display: block;
+
       width: 90%;
+
       margin: 10px auto;
     }
 
     a {
       color: #222;
+
       text-decoration: none;
     }
 
     .divider {
       height: 1px;
+
       background: #ddd;
+
       margin: 25px 0;
     }
 
     .welcome {
-      margin-top: 80px;
+      margin-top: 70px;
     }
 
     .profile-box {
       background: #f7f7f7;
+
       border-radius: 15px;
+
       padding: 20px;
+
       margin: 20px 0;
+
       text-align: right;
     }
 
@@ -143,58 +321,139 @@ function html(title, content) {
     .logout {
       background: #b00020;
     }
+
+    .success {
+      color: #087f23;
+    }
+
+    .error {
+      color: #b00020;
+    }
+
+    .info-box {
+      background: #f7f7f7;
+
+      border-radius: 15px;
+
+      padding: 18px;
+
+      margin: 20px 0;
+    }
+
+    .small-text {
+      font-size: 13px;
+
+      color: #666;
+    }
+
   </style>
+
 </head>
 
 <body>
 
   <div class="phone">
+
     ${content}
+
   </div>
 
 </body>
+
 </html>
 `;
 }
 
-async function createTable() {
+// ===============================
+// ساخت جدول‌های دیتابیس
+// ===============================
+
+async function createTables() {
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
+
       id SERIAL PRIMARY KEY,
+
       name TEXT NOT NULL,
+
       email TEXT UNIQUE NOT NULL,
+
       password TEXT NOT NULL
+
     )
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sessions (
+
+      session_id TEXT PRIMARY KEY,
+
+      user_id INTEGER NOT NULL
+        REFERENCES users(id)
+        ON DELETE CASCADE,
+
+      created_at TIMESTAMP
+        DEFAULT CURRENT_TIMESTAMP
+
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS
+    sessions_user_id_index
+    ON sessions(user_id)
+  `);
 }
+
+// ===============================
+// سرور
+// ===============================
 
 const server = http.createServer(async (req, res) => {
 
   try {
 
+    // ==================================
     // صفحه اصلی
-    if (req.method === "GET" && req.url === "/") {
+    // ==================================
 
-      const user = getSession(req);
+    if (
+      req.method === "GET" &&
+      req.url === "/"
+    ) {
 
-      res.writeHead(200, {
-        "Content-Type": "text/html; charset=utf-8"
-      });
+      const user = await getSession(req);
 
       if (user) {
 
-        res.end(html("صفحه اصلی", `
+        sendHtml(
+          res,
+          200,
+          "صفحه اصلی",
+          `
+
           <div class="welcome">
 
-            <h2>خوش آمدی ${user.name} 👋</h2>
+            <h2>
+              خوش آمدی
+              ${escapeHtml(user.name)}
+              👋
+            </h2>
 
-            <p>ورود موفق بود ✅</p>
+            <p class="success">
+              ورود موفق بود ✅
+            </p>
 
             <div class="divider"></div>
 
-            <h3>صفحه اصلی برنامه</h3>
+            <h3>
+              صفحه اصلی برنامه
+            </h3>
 
-            <p>به برنامه خوش آمدی.</p>
+            <p>
+              به برنامه خوش آمدی.
+            </p>
 
             <a href="/profile">
               <button class="menu-button">
@@ -221,16 +480,27 @@ const server = http.createServer(async (req, res) => {
             </a>
 
           </div>
-        `));
+
+          `
+        );
 
       } else {
 
-        res.end(html("صفحه اصلی", `
+        sendHtml(
+          res,
+          200,
+          "صفحه اصلی",
+          `
+
           <div class="welcome">
 
-            <h1>خوش آمدید 👋</h1>
+            <h1>
+              خوش آمدید 👋
+            </h1>
 
-            <p>به برنامه ما خوش آمدید.</p>
+            <p>
+              به برنامه ما خوش آمدید.
+            </p>
 
             <a href="/signup">
               <button class="main-button">
@@ -245,29 +515,44 @@ const server = http.createServer(async (req, res) => {
             </a>
 
           </div>
-        `));
+
+          `
+        );
       }
 
       return;
     }
 
+    // ==================================
+    // صفحه ثبت‌نام
+    // ==================================
 
-    // صفحه ثبت نام
-    if (req.method === "GET" && req.url === "/signup") {
+    if (
+      req.method === "GET" &&
+      req.url === "/signup"
+    ) {
 
-      res.writeHead(200, {
-        "Content-Type": "text/html; charset=utf-8"
-      });
+      sendHtml(
+        res,
+        200,
+        "ثبت‌نام",
+        `
 
-      res.end(html("ثبت‌نام", `
+        <h2>
+          ثبت‌نام
+        </h2>
 
-        <h2>ثبت‌نام</h2>
+        <div class="divider"></div>
 
-        <form method="POST" action="/signup">
+        <form
+          method="POST"
+          action="/signup"
+        >
 
           <input
             name="name"
             placeholder="نام"
+            maxlength="100"
             required
           >
 
@@ -275,6 +560,7 @@ const server = http.createServer(async (req, res) => {
             name="email"
             type="email"
             placeholder="ایمیل"
+            maxlength="200"
             required
           >
 
@@ -282,10 +568,14 @@ const server = http.createServer(async (req, res) => {
             name="password"
             type="password"
             placeholder="رمز عبور"
+            minlength="6"
             required
           >
 
-          <button type="submit" class="main-button">
+          <button
+            type="submit"
+            class="main-button"
+          >
             ثبت‌نام
           </button>
 
@@ -297,106 +587,226 @@ const server = http.createServer(async (req, res) => {
           بازگشت
         </a>
 
-      `));
+        `
+      );
 
       return;
     }
 
+    // ==================================
+    // انجام ثبت‌نام
+    // ==================================
 
-    // ثبت نام
-    if (req.method === "POST" && req.url === "/signup") {
+    if (
+      req.method === "POST" &&
+      req.url === "/signup"
+    ) {
 
-      let body = "";
+      const data = await readBody(req);
 
-      req.on("data", chunk => {
-        body += chunk;
-      });
+      const name = (data.get("name") || "").trim();
 
-      req.on("end", async () => {
+      const email = (data.get("email") || "")
+        .trim()
+        .toLowerCase();
 
-        const data = new URLSearchParams(body);
+      const password = data.get("password") || "";
 
-        const name = data.get("name");
-        const email = data.get("email");
-        const password = data.get("password");
+      if (
+        !name ||
+        !email ||
+        !password
+      ) {
 
-        try {
+        sendHtml(
+          res,
+          400,
+          "خطا",
+          `
 
-          const hashedPassword = hashPassword(password);
+          <h2 class="error">
+            اطلاعات ناقص است
+          </h2>
 
-          await pool.query(
+          <p>
+            همه قسمت‌ها را کامل کن.
+          </p>
+
+          <a href="/signup">
+            بازگشت به ثبت‌نام
+          </a>
+
+          `
+        );
+
+        return;
+      }
+
+      if (password.length < 6) {
+
+        sendHtml(
+          res,
+          400,
+          "خطا",
+          `
+
+          <h2 class="error">
+            رمز عبور کوتاه است
+          </h2>
+
+          <p>
+            رمز عبور باید حداقل ۶ کاراکتر باشد.
+          </p>
+
+          <a href="/signup">
+            بازگشت
+          </a>
+
+          `
+        );
+
+        return;
+      }
+
+      try {
+
+        const hashedPassword =
+          hashPassword(password);
+
+        await pool.query(
+          `
+          INSERT INTO users
+          (
+            name,
+            email,
+            password
+          )
+          VALUES
+          (
+            $1,
+            $2,
+            $3
+          )
+          `,
+          [
+            name,
+            email,
+            hashedPassword
+          ]
+        );
+
+        sendHtml(
+          res,
+          200,
+          "ثبت‌نام موفق",
+          `
+
+          <h2 class="success">
+            ثبت‌نام موفق شد ✅
+          </h2>
+
+          <p>
+            حساب شما ساخته شد.
+          </p>
+
+          <a href="/login">
+            <button class="main-button">
+              ورود
+            </button>
+          </a>
+
+          `
+        );
+
+      } catch (error) {
+
+        console.error(
+          "Signup error:",
+          error
+        );
+
+        if (
+          error.code === "23505"
+        ) {
+
+          sendHtml(
+            res,
+            400,
+            "خطا",
             `
-            INSERT INTO users
-            (name, email, password)
-            VALUES ($1, $2, $3)
-            `,
-            [name, email, hashedPassword]
-          );
 
-          res.writeHead(200, {
-            "Content-Type": "text/html; charset=utf-8"
-          });
-
-          res.end(html("ثبت‌نام موفق", `
-
-            <h2>ثبت‌نام موفق شد ✅</h2>
-
-            <p>حساب شما ساخته شد.</p>
+            <h2 class="error">
+              این ایمیل قبلاً ثبت شده است.
+            </h2>
 
             <a href="/login">
-              <button class="main-button">
-                ورود
-              </button>
+              ورود
             </a>
 
-          `));
+            <br><br>
 
-        } catch (error) {
+            <a href="/signup">
+              ثبت‌نام با ایمیل دیگر
+            </a>
 
-          console.error(error);
+            `
+          );
 
-          res.writeHead(400, {
-            "Content-Type": "text/html; charset=utf-8"
-          });
+        } else {
 
-          res.end(html("خطا", `
+          sendHtml(
+            res,
+            500,
+            "خطا",
+            `
 
-            <h2>ثبت‌نام انجام نشد.</h2>
-
-            <p>
-              ممکن است این ایمیل قبلاً ثبت شده باشد.
-            </p>
+            <h2 class="error">
+              خطایی در ثبت‌نام رخ داد.
+            </h2>
 
             <a href="/signup">
               بازگشت
             </a>
 
-          `));
+            `
+          );
         }
-
-      });
+      }
 
       return;
     }
 
-
+    // ==================================
     // صفحه ورود
-    if (req.method === "GET" && req.url === "/login") {
+    // ==================================
 
-      res.writeHead(200, {
-        "Content-Type": "text/html; charset=utf-8"
-      });
+    if (
+      req.method === "GET" &&
+      req.url === "/login"
+    ) {
 
-      res.end(html("ورود", `
+      sendHtml(
+        res,
+        200,
+        "ورود",
+        `
 
-        <h2>ورود</h2>
+        <h2>
+          ورود
+        </h2>
 
-        <form method="POST" action="/login">
+        <div class="divider"></div>
+
+        <form
+          method="POST"
+          action="/login"
+        >
 
           <input
             name="email"
             type="email"
             placeholder="ایمیل"
+            maxlength="200"
             required
           >
 
@@ -407,7 +817,10 @@ const server = http.createServer(async (req, res) => {
             required
           >
 
-          <button type="submit" class="main-button">
+          <button
+            type="submit"
+            class="main-button"
+          >
             ورود
           </button>
 
@@ -419,134 +832,189 @@ const server = http.createServer(async (req, res) => {
           بازگشت
         </a>
 
-      `));
+        `
+      );
 
       return;
     }
 
+    // ==================================
+    // انجام ورود
+    // ==================================
 
-    // ورود
-    if (req.method === "POST" && req.url === "/login") {
+    if (
+      req.method === "POST" &&
+      req.url === "/login"
+    ) {
 
-      let body = "";
+      const data = await readBody(req);
 
-      req.on("data", chunk => {
-        body += chunk;
-      });
+      const email = (data.get("email") || "")
+        .trim()
+        .toLowerCase();
 
-      req.on("end", async () => {
+      const password =
+        data.get("password") || "";
 
-        const data = new URLSearchParams(body);
+      try {
 
-        const email = data.get("email");
-        const password = data.get("password");
+        const hashedPassword =
+          hashPassword(password);
 
-        try {
-
-          const hashedPassword = hashPassword(password);
-
-          const result = await pool.query(
+        const result =
+          await pool.query(
             `
-            SELECT id, name, email
+            SELECT
+              id,
+              name,
+              email
             FROM users
-            WHERE email = $1
-            AND password = $2
+            WHERE
+              email = $1
+              AND password = $2
             `,
-            [email, hashedPassword]
+            [
+              email,
+              hashedPassword
+            ]
           );
 
-          if (result.rows.length > 0) {
+        if (
+          result.rows.length === 0
+        ) {
 
-            const user = result.rows[0];
+          sendHtml(
+            res,
+            401,
+            "خطا",
+            `
 
-            const sessionId = createSession(user);
+            <h2 class="error">
+              ورود انجام نشد
+            </h2>
 
-            res.writeHead(302, {
-              "Location": "/",
-              "Set-Cookie": `sessionId=${sessionId}; HttpOnly; Path=/; SameSite=Lax`
-            });
+            <p>
+              ایمیل یا رمز عبور اشتباه است.
+            </p>
 
-            res.end();
+            <a href="/login">
+              تلاش دوباره
+            </a>
 
-          } else {
+            `
+          );
 
-            res.writeHead(200, {
-              "Content-Type": "text/html; charset=utf-8"
-            });
-
-            res.end(html("خطا", `
-
-              <h2>ایمیل یا رمز عبور اشتباه است.</h2>
-
-              <a href="/login">
-                تلاش دوباره
-              </a>
-
-            `));
-          }
-
-        } catch (error) {
-
-          console.error(error);
-
-          res.writeHead(500, {
-            "Content-Type": "text/html; charset=utf-8"
-          });
-
-          res.end(html("خطا", `
-
-            <h2>خطای اتصال به دیتابیس</h2>
-
-          `));
+          return;
         }
 
-      });
+        const user =
+          result.rows[0];
+
+        const sessionId =
+          await createSession(user.id);
+
+        const cookie =
+          `sessionId=${encodeURIComponent(sessionId)}; ` +
+          `HttpOnly; ` +
+          `Path=/; ` +
+          `SameSite=Lax`;
+
+        redirect(
+          res,
+          "/",
+          cookie
+        );
+
+      } catch (error) {
+
+        console.error(
+          "Login error:",
+          error
+        );
+
+        sendHtml(
+          res,
+          500,
+          "خطا",
+          `
+
+          <h2 class="error">
+            خطای اتصال به دیتابیس
+          </h2>
+
+          <p>
+            لطفاً دوباره تلاش کن.
+          </p>
+
+          <a href="/login">
+            بازگشت
+          </a>
+
+          `
+        );
+      }
 
       return;
     }
 
+    // ==================================
+    // پروفایل
+    // ==================================
 
-    // پروفایل واقعی
-    if (req.method === "GET" && req.url === "/profile") {
+    if (
+      req.method === "GET" &&
+      req.url === "/profile"
+    ) {
 
-      const user = getSession(req);
+      const user =
+        await getSession(req);
 
       if (!user) {
 
-        res.writeHead(302, {
-          "Location": "/login"
-        });
-
-        res.end();
+        redirect(
+          res,
+          "/login"
+        );
 
         return;
       }
 
-      res.writeHead(200, {
-        "Content-Type": "text/html; charset=utf-8"
-      });
+      sendHtml(
+        res,
+        200,
+        "پروفایل",
+        `
 
-      res.end(html("پروفایل", `
-
-        <h2>پروفایل 👤</h2>
+        <h2>
+          پروفایل 👤
+        </h2>
 
         <div class="divider"></div>
 
         <div class="profile-box">
 
           <p>
-            <strong>نام:</strong>
-            ${user.name}
+            <strong>
+              نام:
+            </strong>
+
+            ${escapeHtml(user.name)}
           </p>
 
           <p>
-            <strong>ایمیل:</strong>
-            ${user.email}
+            <strong>
+              ایمیل:
+            </strong>
+
+            ${escapeHtml(user.email)}
           </p>
 
           <p>
-            <strong>شناسه کاربر:</strong>
-            ${user.id}
+            <strong>
+              شناسه کاربر:
+            </strong>
+
+            ${escapeHtml(user.id)}
           </p>
 
         </div>
@@ -557,41 +1025,60 @@ const server = http.createServer(async (req, res) => {
           </button>
         </a>
 
-      `));
+        `
+      );
 
       return;
     }
 
+    // ==================================
+    // پیام‌ها
+    // ==================================
 
-    // پیام ها
-    if (req.method === "GET" && req.url === "/messages") {
+    if (
+      req.method === "GET" &&
+      req.url === "/messages"
+    ) {
 
-      const user = getSession(req);
+      const user =
+        await getSession(req);
 
       if (!user) {
 
-        res.writeHead(302, {
-          "Location": "/login"
-        });
-
-        res.end();
+        redirect(
+          res,
+          "/login"
+        );
 
         return;
       }
 
-      res.writeHead(200, {
-        "Content-Type": "text/html; charset=utf-8"
-      });
+      sendHtml(
+        res,
+        200,
+        "پیام‌ها",
+        `
 
-      res.end(html("پیام‌ها", `
-
-        <h2>پیام‌ها 💬</h2>
+        <h2>
+          پیام‌ها 💬
+        </h2>
 
         <div class="divider"></div>
 
-        <p>
-          هنوز پیامی ندارید.
-        </p>
+        <div class="info-box">
+
+          <p>
+            هنوز پیامی ندارید.
+          </p>
+
+          <p class="small-text">
+            بخش پیام‌ها آماده است و
+            می‌توانیم در مرحله بعد
+            سیستم ارسال و دریافت پیام
+            را به آن اضافه کنیم.
+          </p>
+
+        </div>
 
         <a href="/">
           <button class="main-button">
@@ -599,41 +1086,57 @@ const server = http.createServer(async (req, res) => {
           </button>
         </a>
 
-      `));
+        `
+      );
 
       return;
     }
 
-
+    // ==================================
     // تنظیمات
-    if (req.method === "GET" && req.url === "/settings") {
+    // ==================================
 
-      const user = getSession(req);
+    if (
+      req.method === "GET" &&
+      req.url === "/settings"
+    ) {
+
+      const user =
+        await getSession(req);
 
       if (!user) {
 
-        res.writeHead(302, {
-          "Location": "/login"
-        });
-
-        res.end();
+        redirect(
+          res,
+          "/login"
+        );
 
         return;
       }
 
-      res.writeHead(200, {
-        "Content-Type": "text/html; charset=utf-8"
-      });
+      sendHtml(
+        res,
+        200,
+        "تنظیمات",
+        `
 
-      res.end(html("تنظیمات", `
-
-        <h2>تنظیمات ⚙️</h2>
+        <h2>
+          تنظیمات ⚙️
+        </h2>
 
         <div class="divider"></div>
 
-        <p>
-          تنظیمات برنامه
-        </p>
+        <div class="info-box">
+
+          <p>
+            تنظیمات برنامه
+          </p>
+
+          <p class="small-text">
+            حساب شما فعال است.
+          </p>
+
+        </div>
 
         <a href="/">
           <button class="main-button">
@@ -641,87 +1144,150 @@ const server = http.createServer(async (req, res) => {
           </button>
         </a>
 
-      `));
+        `
+      );
 
       return;
     }
 
-
+    // ==================================
     // خروج
-    if (req.method === "GET" && req.url === "/logout") {
+    // ==================================
 
-      const cookie = req.headers.cookie || "";
+    if (
+      req.method === "GET" &&
+      req.url === "/logout"
+    ) {
 
-      const match = cookie.match(/sessionId=([^;]+)/);
+      try {
 
-      if (match) {
-        sessions.delete(match[1]);
+        await deleteSession(req);
+
+      } catch (error) {
+
+        console.error(
+          "Logout error:",
+          error
+        );
       }
 
-      res.writeHead(302, {
-        "Location": "/",
-        "Set-Cookie": "sessionId=; HttpOnly; Path=/; Max-Age=0"
-      });
+      const cookie =
+        "sessionId=; " +
+        "HttpOnly; " +
+        "Path=/; " +
+        "Max-Age=0; " +
+        "SameSite=Lax";
 
-      res.end();
+      redirect(
+        res,
+        "/",
+        cookie
+      );
 
       return;
     }
 
-
+    // ==================================
     // صفحه پیدا نشد
-    res.writeHead(404, {
-      "Content-Type": "text/html; charset=utf-8"
-    });
+    // ==================================
 
-    res.end(html("یافت نشد", `
+    sendHtml(
+      res,
+      404,
+      "یافت نشد",
+      `
 
-      <h2>صفحه پیدا نشد</h2>
+      <h2>
+        صفحه پیدا نشد
+      </h2>
+
+      <p>
+        این صفحه در برنامه وجود ندارد.
+      </p>
 
       <a href="/">
-        بازگشت
+        <button class="main-button">
+          صفحه اصلی
+        </button>
       </a>
 
-    `));
+      `
+    );
 
   } catch (error) {
 
-    console.error(error);
+    console.error(
+      "Server error:",
+      error
+    );
 
-    res.writeHead(500, {
-      "Content-Type": "text/html; charset=utf-8"
-    });
+    sendHtml(
+      res,
+      500,
+      "خطای سرور",
+      `
 
-    res.end("خطای سرور");
+      <h2 class="error">
+        خطای سرور
+      </h2>
+
+      <p>
+        مشکلی در اجرای درخواست رخ داد.
+      </p>
+
+      <a href="/">
+        بازگشت به صفحه اصلی
+      </a>
+
+      `
+    );
   }
+
 });
 
+// ===============================
+// شروع برنامه
+// ===============================
 
-createTable()
+createTables()
   .then(() => {
 
-    server.listen(port, "0.0.0.0", () => {
+    server.listen(
+      port,
+      "0.0.0.0",
+      () => {
 
-      console.log(
-        "Server running on port " + port
-      );
+        console.log(
+          "Server running on port " +
+          port
+        );
 
-    });
+      }
+    );
 
   })
   .catch(error => {
 
     console.error(
-      "Database error:",
+      "Database initialization error:",
       error
     );
 
-    server.listen(port, "0.0.0.0", () => {
+    // اگر ساخت جدول خطا داد،
+    // سرور را متوقف نمی‌کنیم تا
+    // خطا در لاگ Render مشخص باشد.
 
-      console.log(
-        "Server running on port " + port
-      );
+    server.listen(
+      port,
+      "0.0.0.0",
+      () => {
 
-    });
+        console.log(
+          "Server running on port " +
+          port
+        );
+
+      }
+    );
 
   });
