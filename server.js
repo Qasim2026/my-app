@@ -21,7 +21,7 @@ function hashPassword(password) {
 }
 
 function escapeHtml(value) {
-  return String(value || "")
+  return String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -43,7 +43,11 @@ function parseCookies(req) {
     const key = part.slice(0, index).trim();
     const value = part.slice(index + 1).trim();
 
-    cookies[key] = decodeURIComponent(value);
+    try {
+      cookies[key] = decodeURIComponent(value);
+    } catch {
+      cookies[key] = value;
+    }
   });
 
   return cookies;
@@ -58,7 +62,8 @@ async function createSession(userId) {
 
   await pool.query(
     `
-    INSERT INTO sessions (session_id, user_id)
+    INSERT INTO sessions
+    (session_id, user_id)
     VALUES ($1, $2)
     `,
     [sessionId, userId]
@@ -141,7 +146,6 @@ function readBody(req) {
     req.on("data", chunk => {
       body += chunk;
 
-      // جلوگیری از درخواست‌های بسیار بزرگ
       if (body.length > 1024 * 1024) {
         req.destroy();
         reject(new Error("Request body too large"));
@@ -190,6 +194,7 @@ function html(title, content) {
     body {
       margin: 0;
       min-height: 100vh;
+
       font-family:
         Arial,
         Tahoma,
@@ -231,7 +236,9 @@ function html(title, content) {
       line-height: 1.8;
     }
 
-    input {
+    input,
+    textarea,
+    select {
       width: 100%;
 
       padding: 13px;
@@ -244,6 +251,16 @@ function html(title, content) {
       border-radius: 10px;
 
       font-size: 16px;
+
+      font-family:
+        Arial,
+        Tahoma,
+        sans-serif;
+    }
+
+    textarea {
+      min-height: 120px;
+      resize: vertical;
     }
 
     button {
@@ -346,6 +363,80 @@ function html(title, content) {
       color: #666;
     }
 
+    .user-card {
+      background: #f7f7f7;
+
+      border-radius: 15px;
+
+      padding: 15px;
+
+      margin: 12px 0;
+
+      text-align: right;
+    }
+
+    .user-card-name {
+      font-weight: bold;
+
+      font-size: 17px;
+
+      margin-bottom: 5px;
+    }
+
+    .user-card-email {
+      font-size: 13px;
+
+      color: #666;
+
+      margin-bottom: 10px;
+    }
+
+    .message-card {
+      background: #f7f7f7;
+
+      border-radius: 15px;
+
+      padding: 15px;
+
+      margin: 12px 0;
+
+      text-align: right;
+    }
+
+    .message-card.sent {
+      border-right: 4px solid #555;
+    }
+
+    .message-card.received {
+      border-right: 4px solid #087f23;
+    }
+
+    .message-text {
+      white-space: pre-wrap;
+
+      word-break: break-word;
+
+      margin: 10px 0;
+    }
+
+    .message-meta {
+      font-size: 12px;
+
+      color: #666;
+    }
+
+    .tab-button {
+      width: 45%;
+    }
+
+    .back-link {
+      display: inline-block;
+
+      margin-top: 15px;
+
+      font-weight: bold;
+    }
+
   </style>
 
 </head>
@@ -370,6 +461,7 @@ function html(title, content) {
 
 async function createTables() {
 
+  // کاربران
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
 
@@ -384,6 +476,7 @@ async function createTables() {
     )
   `);
 
+  // نشست‌های ورود
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions (
 
@@ -399,11 +492,57 @@ async function createTables() {
     )
   `);
 
+  // ایندکس نشست‌ها
   await pool.query(`
     CREATE INDEX IF NOT EXISTS
     sessions_user_id_index
     ON sessions(user_id)
   `);
+
+  // پیام‌ها
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS messages (
+
+      id SERIAL PRIMARY KEY,
+
+      sender_id INTEGER NOT NULL
+        REFERENCES users(id)
+        ON DELETE CASCADE,
+
+      receiver_id INTEGER NOT NULL
+        REFERENCES users(id)
+        ON DELETE CASCADE,
+
+      message TEXT NOT NULL,
+
+      created_at TIMESTAMP
+        DEFAULT CURRENT_TIMESTAMP
+
+    )
+  `);
+
+  // ایندکس پیام‌های فرستنده
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS
+    messages_sender_id_index
+    ON messages(sender_id)
+  `);
+
+  // ایندکس پیام‌های گیرنده
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS
+    messages_receiver_id_index
+    ON messages(receiver_id)
+  `);
+
+  // ایندکس زمان پیام
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS
+    messages_created_at_index
+    ON messages(created_at)
+  `);
+
+  console.log("Database tables are ready.");
 }
 
 // ===============================
@@ -423,7 +562,8 @@ const server = http.createServer(async (req, res) => {
       req.url === "/"
     ) {
 
-      const user = await getSession(req);
+      const user =
+        await getSession(req);
 
       if (user) {
 
@@ -602,15 +742,20 @@ const server = http.createServer(async (req, res) => {
       req.url === "/signup"
     ) {
 
-      const data = await readBody(req);
+      const data =
+        await readBody(req);
 
-      const name = (data.get("name") || "").trim();
+      const name =
+        (data.get("name") || "")
+          .trim();
 
-      const email = (data.get("email") || "")
-        .trim()
-        .toLowerCase();
+      const email =
+        (data.get("email") || "")
+          .trim()
+          .toLowerCase();
 
-      const password = data.get("password") || "";
+      const password =
+        data.get("password") || "";
 
       if (
         !name ||
@@ -847,11 +992,13 @@ const server = http.createServer(async (req, res) => {
       req.url === "/login"
     ) {
 
-      const data = await readBody(req);
+      const data =
+        await readBody(req);
 
-      const email = (data.get("email") || "")
-        .trim()
-        .toLowerCase();
+      const email =
+        (data.get("email") || "")
+          .trim()
+          .toLowerCase();
 
       const password =
         data.get("password") || "";
@@ -1032,7 +1179,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ==================================
-    // پیام‌ها
+    // صفحه پیام‌ها
     // ==================================
 
     if (
@@ -1053,14 +1200,410 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      try {
+
+        // کاربران دیگر
+        const usersResult =
+          await pool.query(
+            `
+            SELECT
+              id,
+              name,
+              email
+            FROM users
+            WHERE id <> $1
+            ORDER BY id ASC
+            `,
+            [user.id]
+          );
+
+        // پیام‌های دریافتی
+        const receivedResult =
+          await pool.query(
+            `
+            SELECT
+              messages.id,
+              messages.message,
+              messages.created_at,
+              users.name AS sender_name,
+              users.email AS sender_email
+            FROM messages
+            INNER JOIN users
+              ON users.id = messages.sender_id
+            WHERE messages.receiver_id = $1
+            ORDER BY messages.created_at DESC
+            `,
+            [user.id]
+          );
+
+        // پیام‌های ارسالی
+        const sentResult =
+          await pool.query(
+            `
+            SELECT
+              messages.id,
+              messages.message,
+              messages.created_at,
+              users.name AS receiver_name,
+              users.email AS receiver_email
+            FROM messages
+            INNER JOIN users
+              ON users.id = messages.receiver_id
+            WHERE messages.sender_id = $1
+            ORDER BY messages.created_at DESC
+            `,
+            [user.id]
+          );
+
+        let usersHtml = "";
+
+        if (
+          usersResult.rows.length === 0
+        ) {
+
+          usersHtml = `
+            <div class="info-box">
+              <p>
+                فعلاً کاربر دیگری برای ارسال پیام وجود ندارد.
+              </p>
+            </div>
+          `;
+
+        } else {
+
+          usersResult.rows.forEach(otherUser => {
+
+            usersHtml += `
+
+              <div class="user-card">
+
+                <div class="user-card-name">
+                  ${escapeHtml(otherUser.name)}
+                </div>
+
+                <div class="user-card-email">
+                  ${escapeHtml(otherUser.email)}
+                </div>
+
+                <a href="/send-message?to=${encodeURIComponent(otherUser.id)}">
+                  <button class="main-button">
+                    ارسال پیام
+                  </button>
+                </a>
+
+              </div>
+
+            `;
+          });
+        }
+
+        let receivedHtml = "";
+
+        if (
+          receivedResult.rows.length === 0
+        ) {
+
+          receivedHtml = `
+            <div class="info-box">
+              <p>
+                هنوز پیام دریافتی ندارید.
+              </p>
+            </div>
+          `;
+
+        } else {
+
+          receivedResult.rows.forEach(message => {
+
+            const date =
+              new Date(
+                message.created_at
+              ).toLocaleString(
+                "fa-IR"
+              );
+
+            receivedHtml += `
+
+              <div class="message-card received">
+
+                <strong>
+                  از:
+                  ${escapeHtml(message.sender_name)}
+                </strong>
+
+                <div class="message-text">
+                  ${escapeHtml(message.message)}
+                </div>
+
+                <div class="message-meta">
+                  ${escapeHtml(date)}
+                </div>
+
+              </div>
+
+            `;
+          });
+        }
+
+        let sentHtml = "";
+
+        if (
+          sentResult.rows.length === 0
+        ) {
+
+          sentHtml = `
+            <div class="info-box">
+              <p>
+                هنوز پیامی ارسال نکرده‌اید.
+              </p>
+            </div>
+          `;
+
+        } else {
+
+          sentResult.rows.forEach(message => {
+
+            const date =
+              new Date(
+                message.created_at
+              ).toLocaleString(
+                "fa-IR"
+              );
+
+            sentHtml += `
+
+              <div class="message-card sent">
+
+                <strong>
+                  به:
+                  ${escapeHtml(message.receiver_name)}
+                </strong>
+
+                <div class="message-text">
+                  ${escapeHtml(message.message)}
+                </div>
+
+                <div class="message-meta">
+                  ${escapeHtml(date)}
+                </div>
+
+              </div>
+
+            `;
+          });
+        }
+
+        sendHtml(
+          res,
+          200,
+          "پیام‌ها",
+          `
+
+          <h2>
+            پیام‌ها 💬
+          </h2>
+
+          <div class="divider"></div>
+
+          <h3>
+            ارسال پیام
+          </h3>
+
+          <p class="small-text">
+            یکی از کاربران را انتخاب کن.
+          </p>
+
+          ${usersHtml}
+
+          <div class="divider"></div>
+
+          <h3>
+            پیام‌های دریافتی 📥
+          </h3>
+
+          ${receivedHtml}
+
+          <div class="divider"></div>
+
+          <h3>
+            پیام‌های ارسالی 📤
+          </h3>
+
+          ${sentHtml}
+
+          <div class="divider"></div>
+
+          <a href="/">
+            <button class="main-button">
+              صفحه اصلی
+            </button>
+          </a>
+
+          `
+        );
+
+      } catch (error) {
+
+        console.error(
+          "Messages page error:",
+          error
+        );
+
+        sendHtml(
+          res,
+          500,
+          "خطا",
+          `
+
+          <h2 class="error">
+            خطا در نمایش پیام‌ها
+          </h2>
+
+          <p>
+            لطفاً دوباره تلاش کن.
+          </p>
+
+          <a href="/">
+            صفحه اصلی
+          </a>
+
+          `
+        );
+      }
+
+      return;
+    }
+
+    // ==================================
+    // صفحه ارسال پیام
+    // ==================================
+
+    if (
+      req.method === "GET" &&
+      req.url.startsWith("/send-message")
+    ) {
+
+      const user =
+        await getSession(req);
+
+      if (!user) {
+
+        redirect(
+          res,
+          "/login"
+        );
+
+        return;
+      }
+
+      const url =
+        new URL(
+          req.url,
+          "http://localhost"
+        );
+
+      const receiverId =
+        Number(
+          url.searchParams.get("to")
+        );
+
+      if (
+        !Number.isInteger(receiverId) ||
+        receiverId <= 0
+      ) {
+
+        sendHtml(
+          res,
+          400,
+          "خطا",
+          `
+
+          <h2 class="error">
+            گیرنده معتبر نیست.
+          </h2>
+
+          <a href="/messages">
+            بازگشت به پیام‌ها
+          </a>
+
+          `
+        );
+
+        return;
+      }
+
+      if (
+        receiverId === user.id
+      ) {
+
+        sendHtml(
+          res,
+          400,
+          "خطا",
+          `
+
+          <h2 class="error">
+            نمی‌توانی برای خودت پیام بفرستی.
+          </h2>
+
+          <a href="/messages">
+            بازگشت به پیام‌ها
+          </a>
+
+          `
+        );
+
+        return;
+      }
+
+      const receiverResult =
+        await pool.query(
+          `
+          SELECT
+            id,
+            name,
+            email
+          FROM users
+          WHERE id = $1
+          `,
+          [receiverId]
+        );
+
+      if (
+        receiverResult.rows.length === 0
+      ) {
+
+        sendHtml(
+          res,
+          404,
+          "خطا",
+          `
+
+          <h2 class="error">
+            کاربر پیدا نشد.
+          </h2>
+
+          <a href="/messages">
+            بازگشت به پیام‌ها
+          </a>
+
+          `
+        );
+
+        return;
+      }
+
+      const receiver =
+        receiverResult.rows[0];
+
       sendHtml(
         res,
         200,
-        "پیام‌ها",
+        "ارسال پیام",
         `
 
         <h2>
-          پیام‌ها 💬
+          ارسال پیام 💬
         </h2>
 
         <div class="divider"></div>
@@ -1068,26 +1611,303 @@ const server = http.createServer(async (req, res) => {
         <div class="info-box">
 
           <p>
-            هنوز پیامی ندارید.
+            <strong>
+              گیرنده:
+            </strong>
+          </p>
+
+          <p>
+            ${escapeHtml(receiver.name)}
           </p>
 
           <p class="small-text">
-            بخش پیام‌ها آماده است و
-            می‌توانیم در مرحله بعد
-            سیستم ارسال و دریافت پیام
-            را به آن اضافه کنیم.
+            ${escapeHtml(receiver.email)}
           </p>
 
         </div>
 
-        <a href="/">
-          <button class="main-button">
-            صفحه اصلی
+        <form
+          method="POST"
+          action="/send-message"
+        >
+
+          <input
+            type="hidden"
+            name="receiver_id"
+            value="${escapeHtml(receiver.id)}"
+          >
+
+          <textarea
+            name="message"
+            placeholder="پیام خود را بنویس..."
+            maxlength="5000"
+            required
+          ></textarea>
+
+          <button
+            type="submit"
+            class="main-button"
+          >
+            ارسال پیام 📤
           </button>
+
+        </form>
+
+        <a
+          href="/messages"
+          class="back-link"
+        >
+          بازگشت به پیام‌ها
         </a>
 
         `
       );
+
+      return;
+    }
+
+    // ==================================
+    // انجام ارسال پیام
+    // ==================================
+
+    if (
+      req.method === "POST" &&
+      req.url === "/send-message"
+    ) {
+
+      const user =
+        await getSession(req);
+
+      if (!user) {
+
+        redirect(
+          res,
+          "/login"
+        );
+
+        return;
+      }
+
+      const data =
+        await readBody(req);
+
+      const receiverId =
+        Number(
+          data.get("receiver_id")
+        );
+
+      const message =
+        (data.get("message") || "")
+          .trim();
+
+      if (
+        !Number.isInteger(receiverId) ||
+        receiverId <= 0
+      ) {
+
+        sendHtml(
+          res,
+          400,
+          "خطا",
+          `
+
+          <h2 class="error">
+            گیرنده معتبر نیست.
+          </h2>
+
+          <a href="/messages">
+            بازگشت
+          </a>
+
+          `
+        );
+
+        return;
+      }
+
+      if (
+        receiverId === user.id
+      ) {
+
+        sendHtml(
+          res,
+          400,
+          "خطا",
+          `
+
+          <h2 class="error">
+            نمی‌توانی برای خودت پیام بفرستی.
+          </h2>
+
+          <a href="/messages">
+            بازگشت
+          </a>
+
+          `
+        );
+
+        return;
+      }
+
+      if (!message) {
+
+        sendHtml(
+          res,
+          400,
+          "خطا",
+          `
+
+          <h2 class="error">
+            پیام خالی است.
+          </h2>
+
+          <a href="/messages">
+            بازگشت
+          </a>
+
+          `
+        );
+
+        return;
+      }
+
+      if (
+        message.length > 5000
+      ) {
+
+        sendHtml(
+          res,
+          400,
+          "خطا",
+          `
+
+          <h2 class="error">
+            پیام بیش از حد طولانی است.
+          </h2>
+
+          <p>
+            حداکثر ۵۰۰۰ کاراکتر مجاز است.
+          </p>
+
+          <a href="/messages">
+            بازگشت
+          </a>
+
+          `
+        );
+
+        return;
+      }
+
+      try {
+
+        const receiverResult =
+          await pool.query(
+            `
+            SELECT id
+            FROM users
+            WHERE id = $1
+            `,
+            [receiverId]
+          );
+
+        if (
+          receiverResult.rows.length === 0
+        ) {
+
+          sendHtml(
+            res,
+            404,
+            "خطا",
+            `
+
+            <h2 class="error">
+              کاربر گیرنده پیدا نشد.
+            </h2>
+
+            <a href="/messages">
+              بازگشت
+            </a>
+
+            `
+          );
+
+          return;
+        }
+
+        await pool.query(
+          `
+          INSERT INTO messages
+          (
+            sender_id,
+            receiver_id,
+            message
+          )
+          VALUES
+          (
+            $1,
+            $2,
+            $3
+          )
+          `,
+          [
+            user.id,
+            receiverId,
+            message
+          ]
+        );
+
+        sendHtml(
+          res,
+          200,
+          "پیام ارسال شد",
+          `
+
+          <h2 class="success">
+            پیام ارسال شد ✅
+          </h2>
+
+          <p>
+            پیام شما با موفقیت ذخیره شد.
+          </p>
+
+          <a href="/messages">
+            <button class="main-button">
+              بازگشت به پیام‌ها
+            </button>
+          </a>
+
+          `
+        );
+
+      } catch (error) {
+
+        console.error(
+          "Send message error:",
+          error
+        );
+
+        sendHtml(
+          res,
+          500,
+          "خطا",
+          `
+
+          <h2 class="error">
+            ارسال پیام انجام نشد.
+          </h2>
+
+          <p>
+            لطفاً دوباره تلاش کن.
+          </p>
+
+          <a href="/messages">
+            بازگشت
+          </a>
+
+          `
+        );
+      }
 
       return;
     }
@@ -1134,6 +1954,12 @@ const server = http.createServer(async (req, res) => {
 
           <p class="small-text">
             حساب شما فعال است.
+          </p>
+
+          <p class="small-text">
+            شما با حساب
+            ${escapeHtml(user.email)}
+            وارد شده‌اید.
           </p>
 
         </div>
@@ -1272,10 +2098,6 @@ createTables()
       "Database initialization error:",
       error
     );
-
-    // اگر ساخت جدول خطا داد،
-    // سرور را متوقف نمی‌کنیم تا
-    // خطا در لاگ Render مشخص باشد.
 
     server.listen(
       port,
