@@ -9,8 +9,35 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
+// ذخیره ورود کاربران
+const sessions = new Map();
+
 function hashPassword(password) {
   return crypto.createHash("sha256").update(password).digest("hex");
+}
+
+function createSession(user) {
+  const sessionId = crypto.randomBytes(32).toString("hex");
+
+  sessions.set(sessionId, {
+    id: user.id,
+    name: user.name,
+    email: user.email
+  });
+
+  return sessionId;
+}
+
+function getSession(req) {
+  const cookie = req.headers.cookie || "";
+
+  const match = cookie.match(/sessionId=([^;]+)/);
+
+  if (!match) {
+    return null;
+  }
+
+  return sessions.get(match[1]) || null;
 }
 
 function html(title, content) {
@@ -20,6 +47,7 @@ function html(title, content) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
   <title>${title}</title>
 
   <style>
@@ -79,6 +107,12 @@ function html(title, content) {
       display: block;
     }
 
+    .menu-button {
+      display: block;
+      width: 90%;
+      margin: 10px auto;
+    }
+
     a {
       color: #222;
       text-decoration: none;
@@ -94,18 +128,30 @@ function html(title, content) {
       margin-top: 80px;
     }
 
-    .menu-button {
-      display: block;
-      width: 90%;
-      margin: 10px auto;
+    .profile-box {
+      background: #f7f7f7;
+      border-radius: 15px;
+      padding: 20px;
+      margin: 20px 0;
+      text-align: right;
+    }
+
+    .profile-box p {
+      margin: 12px 0;
+    }
+
+    .logout {
+      background: #b00020;
     }
   </style>
 </head>
 
 <body>
+
   <div class="phone">
     ${content}
   </div>
+
 </body>
 </html>
 `;
@@ -123,38 +169,98 @@ async function createTable() {
 }
 
 const server = http.createServer(async (req, res) => {
+
   try {
 
+    // صفحه اصلی
     if (req.method === "GET" && req.url === "/") {
+
+      const user = getSession(req);
+
       res.writeHead(200, {
         "Content-Type": "text/html; charset=utf-8"
       });
 
-      res.end(html("صفحه اصلی", `
-        <div class="welcome">
-          <h1>خوش آمدید 👋</h1>
+      if (user) {
 
-          <p>به برنامه ما خوش آمدید.</p>
+        res.end(html("صفحه اصلی", `
+          <div class="welcome">
 
-          <a href="/signup">
-            <button class="main-button">ثبت‌نام</button>
-          </a>
+            <h2>خوش آمدی ${user.name} 👋</h2>
 
-          <a href="/login">
-            <button class="main-button">ورود</button>
-          </a>
-        </div>
-      `));
+            <p>ورود موفق بود ✅</p>
+
+            <div class="divider"></div>
+
+            <h3>صفحه اصلی برنامه</h3>
+
+            <p>به برنامه خوش آمدی.</p>
+
+            <a href="/profile">
+              <button class="menu-button">
+                پروفایل 👤
+              </button>
+            </a>
+
+            <a href="/messages">
+              <button class="menu-button">
+                پیام‌ها 💬
+              </button>
+            </a>
+
+            <a href="/settings">
+              <button class="menu-button">
+                تنظیمات ⚙️
+              </button>
+            </a>
+
+            <a href="/logout">
+              <button class="menu-button logout">
+                خروج
+              </button>
+            </a>
+
+          </div>
+        `));
+
+      } else {
+
+        res.end(html("صفحه اصلی", `
+          <div class="welcome">
+
+            <h1>خوش آمدید 👋</h1>
+
+            <p>به برنامه ما خوش آمدید.</p>
+
+            <a href="/signup">
+              <button class="main-button">
+                ثبت‌نام
+              </button>
+            </a>
+
+            <a href="/login">
+              <button class="main-button">
+                ورود
+              </button>
+            </a>
+
+          </div>
+        `));
+      }
 
       return;
     }
 
+
+    // صفحه ثبت نام
     if (req.method === "GET" && req.url === "/signup") {
+
       res.writeHead(200, {
         "Content-Type": "text/html; charset=utf-8"
       });
 
       res.end(html("ثبت‌نام", `
+
         <h2>ثبت‌نام</h2>
 
         <form method="POST" action="/signup">
@@ -187,13 +293,19 @@ const server = http.createServer(async (req, res) => {
 
         <br>
 
-        <a href="/">بازگشت</a>
+        <a href="/">
+          بازگشت
+        </a>
+
       `));
 
       return;
     }
 
+
+    // ثبت نام
     if (req.method === "POST" && req.url === "/signup") {
+
       let body = "";
 
       req.on("data", chunk => {
@@ -201,6 +313,7 @@ const server = http.createServer(async (req, res) => {
       });
 
       req.on("end", async () => {
+
         const data = new URLSearchParams(body);
 
         const name = data.get("name");
@@ -208,11 +321,15 @@ const server = http.createServer(async (req, res) => {
         const password = data.get("password");
 
         try {
+
           const hashedPassword = hashPassword(password);
 
           await pool.query(
-            `INSERT INTO users (name, email, password)
-             VALUES ($1, $2, $3)`,
+            `
+            INSERT INTO users
+            (name, email, password)
+            VALUES ($1, $2, $3)
+            `,
             [name, email, hashedPassword]
           );
 
@@ -221,16 +338,21 @@ const server = http.createServer(async (req, res) => {
           });
 
           res.end(html("ثبت‌نام موفق", `
+
             <h2>ثبت‌نام موفق شد ✅</h2>
 
             <p>حساب شما ساخته شد.</p>
 
             <a href="/login">
-              <button class="main-button">ورود</button>
+              <button class="main-button">
+                ورود
+              </button>
             </a>
+
           `));
 
         } catch (error) {
+
           console.error(error);
 
           res.writeHead(400, {
@@ -238,24 +360,35 @@ const server = http.createServer(async (req, res) => {
           });
 
           res.end(html("خطا", `
+
             <h2>ثبت‌نام انجام نشد.</h2>
 
-            <p>ممکن است این ایمیل قبلاً ثبت شده باشد.</p>
+            <p>
+              ممکن است این ایمیل قبلاً ثبت شده باشد.
+            </p>
 
-            <a href="/signup">بازگشت</a>
+            <a href="/signup">
+              بازگشت
+            </a>
+
           `));
         }
+
       });
 
       return;
     }
 
+
+    // صفحه ورود
     if (req.method === "GET" && req.url === "/login") {
+
       res.writeHead(200, {
         "Content-Type": "text/html; charset=utf-8"
       });
 
       res.end(html("ورود", `
+
         <h2>ورود</h2>
 
         <form method="POST" action="/login">
@@ -282,13 +415,19 @@ const server = http.createServer(async (req, res) => {
 
         <br>
 
-        <a href="/">بازگشت</a>
+        <a href="/">
+          بازگشت
+        </a>
+
       `));
 
       return;
     }
 
+
+    // ورود
     if (req.method === "POST" && req.url === "/login") {
+
       let body = "";
 
       req.on("data", chunk => {
@@ -296,68 +435,58 @@ const server = http.createServer(async (req, res) => {
       });
 
       req.on("end", async () => {
+
         const data = new URLSearchParams(body);
 
         const email = data.get("email");
         const password = data.get("password");
 
         try {
+
           const hashedPassword = hashPassword(password);
 
           const result = await pool.query(
-            `SELECT id, name, email FROM users
-             WHERE email = $1 AND password = $2`,
+            `
+            SELECT id, name, email
+            FROM users
+            WHERE email = $1
+            AND password = $2
+            `,
             [email, hashedPassword]
           );
-
-          res.writeHead(200, {
-            "Content-Type": "text/html; charset=utf-8"
-          });
 
           if (result.rows.length > 0) {
 
             const user = result.rows[0];
 
-            res.end(html("صفحه اصلی", `
-              <h2>خوش آمدی ${user.name} 👋</h2>
+            const sessionId = createSession(user);
 
-              <p>ورود موفق بود ✅</p>
+            res.writeHead(302, {
+              "Location": "/",
+              "Set-Cookie": `sessionId=${sessionId}; HttpOnly; Path=/; SameSite=Lax`
+            });
 
-              <div class="divider"></div>
-
-              <h3>صفحه اصلی برنامه</h3>
-
-              <p>به برنامه خوش آمدی.</p>
-
-              <a href="/profile">
-                <button class="menu-button">پروفایل</button>
-              </a>
-
-              <a href="/messages">
-                <button class="menu-button">پیام‌ها</button>
-              </a>
-
-              <a href="/settings">
-                <button class="menu-button">تنظیمات</button>
-              </a>
-
-              <br>
-
-              <a href="/">بازگشت به صفحه اصلی</a>
-            `));
+            res.end();
 
           } else {
 
+            res.writeHead(200, {
+              "Content-Type": "text/html; charset=utf-8"
+            });
+
             res.end(html("خطا", `
+
               <h2>ایمیل یا رمز عبور اشتباه است.</h2>
 
               <a href="/login">
                 تلاش دوباره
               </a>
+
             `));
           }
 
         } catch (error) {
+
           console.error(error);
 
           res.writeHead(500, {
@@ -365,87 +494,198 @@ const server = http.createServer(async (req, res) => {
           });
 
           res.end(html("خطا", `
+
             <h2>خطای اتصال به دیتابیس</h2>
+
           `));
         }
+
       });
 
       return;
     }
 
+
+    // پروفایل واقعی
     if (req.method === "GET" && req.url === "/profile") {
+
+      const user = getSession(req);
+
+      if (!user) {
+
+        res.writeHead(302, {
+          "Location": "/login"
+        });
+
+        res.end();
+
+        return;
+      }
+
       res.writeHead(200, {
         "Content-Type": "text/html; charset=utf-8"
       });
 
       res.end(html("پروفایل", `
+
         <h2>پروفایل 👤</h2>
 
         <div class="divider"></div>
 
-        <p>صفحه پروفایل شما</p>
+        <div class="profile-box">
 
-        <p>اطلاعات پروفایل در این قسمت قرار می‌گیرد.</p>
+          <p>
+            <strong>نام:</strong>
+            ${user.name}
+          </p>
+
+          <p>
+            <strong>ایمیل:</strong>
+            ${user.email}
+          </p>
+
+          <p>
+            <strong>شناسه کاربر:</strong>
+            ${user.id}
+          </p>
+
+        </div>
 
         <a href="/">
-          <button class="main-button">صفحه اصلی</button>
+          <button class="main-button">
+            صفحه اصلی
+          </button>
         </a>
+
       `));
 
       return;
     }
 
+
+    // پیام ها
     if (req.method === "GET" && req.url === "/messages") {
+
+      const user = getSession(req);
+
+      if (!user) {
+
+        res.writeHead(302, {
+          "Location": "/login"
+        });
+
+        res.end();
+
+        return;
+      }
+
       res.writeHead(200, {
         "Content-Type": "text/html; charset=utf-8"
       });
 
       res.end(html("پیام‌ها", `
+
         <h2>پیام‌ها 💬</h2>
 
         <div class="divider"></div>
 
-        <p>هنوز پیامی ندارید.</p>
+        <p>
+          هنوز پیامی ندارید.
+        </p>
 
         <a href="/">
-          <button class="main-button">صفحه اصلی</button>
+          <button class="main-button">
+            صفحه اصلی
+          </button>
         </a>
+
       `));
 
       return;
     }
 
+
+    // تنظیمات
     if (req.method === "GET" && req.url === "/settings") {
+
+      const user = getSession(req);
+
+      if (!user) {
+
+        res.writeHead(302, {
+          "Location": "/login"
+        });
+
+        res.end();
+
+        return;
+      }
+
       res.writeHead(200, {
         "Content-Type": "text/html; charset=utf-8"
       });
 
       res.end(html("تنظیمات", `
+
         <h2>تنظیمات ⚙️</h2>
 
         <div class="divider"></div>
 
-        <p>تنظیمات برنامه</p>
+        <p>
+          تنظیمات برنامه
+        </p>
 
         <a href="/">
-          <button class="main-button">صفحه اصلی</button>
+          <button class="main-button">
+            صفحه اصلی
+          </button>
         </a>
+
       `));
 
       return;
     }
 
+
+    // خروج
+    if (req.method === "GET" && req.url === "/logout") {
+
+      const cookie = req.headers.cookie || "";
+
+      const match = cookie.match(/sessionId=([^;]+)/);
+
+      if (match) {
+        sessions.delete(match[1]);
+      }
+
+      res.writeHead(302, {
+        "Location": "/",
+        "Set-Cookie": "sessionId=; HttpOnly; Path=/; Max-Age=0"
+      });
+
+      res.end();
+
+      return;
+    }
+
+
+    // صفحه پیدا نشد
     res.writeHead(404, {
       "Content-Type": "text/html; charset=utf-8"
     });
 
     res.end(html("یافت نشد", `
+
       <h2>صفحه پیدا نشد</h2>
 
-      <a href="/">بازگشت</a>
+      <a href="/">
+        بازگشت
+      </a>
+
     `));
 
   } catch (error) {
+
     console.error(error);
 
     res.writeHead(500, {
@@ -456,16 +696,32 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+
 createTable()
   .then(() => {
-    server.listen(port, "0.0.0.0", () => {
-      console.log("Server running on port " + port);
-    });
-  })
-  .catch(error => {
-    console.error("Database error:", error);
 
     server.listen(port, "0.0.0.0", () => {
-      console.log("Server running on port " + port);
+
+      console.log(
+        "Server running on port " + port
+      );
+
     });
+
+  })
+  .catch(error => {
+
+    console.error(
+      "Database error:",
+      error
+    );
+
+    server.listen(port, "0.0.0.0", () => {
+
+      console.log(
+        "Server running on port " + port
+      );
+
+    });
+
   });
