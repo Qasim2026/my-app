@@ -93,6 +93,12 @@ function html(title, content) {
     .welcome {
       margin-top: 80px;
     }
+
+    .menu-button {
+      display: block;
+      width: 90%;
+      margin: 10px auto;
+    }
   </style>
 </head>
 
@@ -299,7 +305,7 @@ const server = http.createServer(async (req, res) => {
           const hashedPassword = hashPassword(password);
 
           const result = await pool.query(
-            `SELECT name FROM users
+            `SELECT id, name, email FROM users
              WHERE email = $1 AND password = $2`,
             [email, hashedPassword]
           );
@@ -310,8 +316,10 @@ const server = http.createServer(async (req, res) => {
 
           if (result.rows.length > 0) {
 
+            const user = result.rows[0];
+
             res.end(html("صفحه اصلی", `
-              <h2>خوش آمدی ${result.rows[0].name} 👋</h2>
+              <h2>خوش آمدی ${user.name} 👋</h2>
 
               <p>ورود موفق بود ✅</p>
 
@@ -321,11 +329,19 @@ const server = http.createServer(async (req, res) => {
 
               <p>به برنامه خوش آمدی.</p>
 
-              <button>پروفایل</button>
-              <button>پیام‌ها</button>
-              <button>تنظیمات</button>
+              <a href="/profile">
+                <button class="menu-button">پروفایل</button>
+              </a>
 
-              <br><br>
+              <a href="/messages">
+                <button class="menu-button">پیام‌ها</button>
+              </a>
+
+              <a href="/settings">
+                <button class="menu-button">تنظیمات</button>
+              </a>
+
+              <br>
 
               <a href="/">بازگشت به صفحه اصلی</a>
             `));
@@ -353,6 +369,68 @@ const server = http.createServer(async (req, res) => {
           `));
         }
       });
+
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/profile") {
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8"
+      });
+
+      res.end(html("پروفایل", `
+        <h2>پروفایل 👤</h2>
+
+        <div class="divider"></div>
+
+        <p>صفحه پروفایل شما</p>
+
+        <p>اطلاعات پروفایل در این قسمت قرار می‌گیرد.</p>
+
+        <a href="/">
+          <button class="main-button">صفحه اصلی</button>
+        </a>
+      `));
+
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/messages") {
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8"
+      });
+
+      res.end(html("پیام‌ها", `
+        <h2>پیام‌ها 💬</h2>
+
+        <div class="divider"></div>
+
+        <p>هنوز پیامی ندارید.</p>
+
+        <a href="/">
+          <button class="main-button">صفحه اصلی</button>
+        </a>
+      `));
+
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/settings") {
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8"
+      });
+
+      res.end(html("تنظیمات", `
+        <h2>تنظیمات ⚙️</h2>
+
+        <div class="divider"></div>
+
+        <p>تنظیمات برنامه</p>
+
+        <a href="/">
+          <button class="main-button">صفحه اصلی</button>
+        </a>
+      `));
 
       return;
     }
