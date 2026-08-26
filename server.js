@@ -1,3 +1,5 @@
+server.js کامل اصلاح‌شده
+
 const http = require("http");
 const crypto = require("crypto");
 const { Pool } = require("pg");
@@ -479,9 +481,25 @@ async function createTables() {
       user_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-      content TEXT NOT NULL,
+      content TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
+  `);
+
+  // ====================================================
+  // اصلاح جدول posts موجود
+  // ====================================================
+
+  await pool.query(`
+    ALTER TABLE posts
+    ADD COLUMN IF NOT EXISTS content TEXT
+  `);
+
+  // اگر پست‌های قدیمی وجود داشته باشند و content خالی باشد
+  await pool.query(`
+    UPDATE posts
+    SET content = ''
+    WHERE content IS NULL
   `);
 
   await pool.query(`
@@ -762,8 +780,7 @@ const server = http.createServer(async (req, res) => {
 
         ${postsHtml}
 
-        `,
-        true
+        `
       );
 
       return;
@@ -2260,7 +2277,7 @@ const server = http.createServer(async (req, res) => {
       sendHtml(
         res,
         200,
-        `گفت‌وگو با ${receiver.name} 💬`,
+        `گفت‌وگو با ${escapeHtml(receiver.name)} 💬`,
         `
 
         ${messagesHtml}
