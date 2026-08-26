@@ -6,7 +6,7 @@ const PORT = Number(process.env.PORT || 10000);
 const DATABASE_URL = process.env.DATABASE_URL;
 
 if (!DATABASE_URL) {
-  console.error("DATABASE_URL is not set. Add it in Render > Environment.");
+  console.error("DATABASE_URL is not set.");
   process.exit(1);
 }
 
@@ -17,11 +17,18 @@ const pool = new Pool({
   idleTimeoutMillis: 30000
 });
 
+/* =========================
+   ابزارهای اصلی
+========================= */
+
 function hashPassword(password) {
-  return crypto.createHash("sha256").update(String(password)).digest("hex");
+  return crypto
+    .createHash("sha256")
+    .update(String(password))
+    .digest("hex");
 }
 
-function createToken() {
+function token() {
   return crypto.randomBytes(32).toString("hex");
 }
 
@@ -39,12 +46,12 @@ function parseCookies(req) {
   const header = req.headers.cookie || "";
 
   for (const part of header.split(";")) {
-    const index = part.indexOf("=");
+    const i = part.indexOf("=");
 
-    if (index < 0) continue;
+    if (i === -1) continue;
 
-    const key = part.slice(0, index).trim();
-    const value = part.slice(index + 1).trim();
+    const key = part.slice(0, i).trim();
+    const value = part.slice(i + 1).trim();
 
     try {
       result[key] = decodeURIComponent(value);
@@ -58,34 +65,34 @@ function parseCookies(req) {
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
-    let data = "";
+    let body = "";
 
     req.on("data", chunk => {
-      data += chunk;
+      body += chunk;
 
-      if (data.length > 2 * 1024 * 1024) {
+      if (body.length > 2 * 1024 * 1024) {
         reject(new Error("Request body too large"));
         req.destroy();
       }
     });
 
     req.on("end", () => {
-      resolve(new URLSearchParams(data));
+      resolve(new URLSearchParams(body));
     });
 
     req.on("error", reject);
   });
 }
 
-function setSessionCookie(sessionId) {
-  return `sessionId=${encodeURIComponent(sessionId)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=2592000`;
+function sessionCookie(id) {
+  return `sessionId=${encodeURIComponent(id)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=2592000`;
 }
 
-function clearSessionCookie() {
+function clearCookie() {
   return "sessionId=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0";
 }
 
-function redirect(res, location, cookie) {
+function redirect(res, location, cookie = null) {
   const headers = {
     Location: location
   };
@@ -98,26 +105,26 @@ function redirect(res, location, cookie) {
   res.end();
 }
 
-async function getSession(req) {
-  const sessionId = parseCookies(req).sessionId;
+async function getUser(req) {
+  const id = parseCookies(req).sessionId;
 
-  if (!sessionId) {
-    return null;
-  }
+  if (!id) return null;
 
   const result = await pool.query(
-    `SELECT u.id, u.name, u.email
-     FROM sessions s
-     JOIN users u ON u.id = s.user_id
-     WHERE s.session_id = $1`,
-    [sessionId]
+    `
+    SELECT u.id, u.name, u.email
+    FROM sessions s
+    JOIN users u ON u.id = s.user_id
+    WHERE s.session_id = $1
+    `,
+    [id]
   );
 
   return result.rows[0] || null;
 }
 
 function avatar(name) {
-  const first = String(name || "?").trim().slice(0, 1) || "?";
+  const first = String(name || "?").trim().charAt(0) || "?";
 
   return `
     <div class="avatar">
@@ -126,52 +133,68 @@ function avatar(name) {
   `;
 }
 
-function formButton(action, text, className = "") {
+function buttonForm(action, text, cls = "") {
   return `
-    <form method="post" action="${action}" class="inline-form">
-      <button class="${className}">${text}</button>
+    <form method="post" action="${action}" class="inline">
+      <button class="${cls}">${text}</button>
     </form>
   `;
 }
 
+/* =========================
+   ظاهر سایت
+========================= */
+
 function layout(title, content, user) {
-  const nav = user
-    ? `
-      <nav class="bottom-nav">
-        <a href="/">
-          <span>🏠</span>
-          خانه
-        </a>
 
-        <a href="/search">
-          <span>🔎</span>
-          جستجو
-        </a>
+  const nav = user ? `
+    <nav class="bottom-nav">
 
-        <a href="/new-post">
-          <span>➕</span>
-          پست
-        </a>
+      <a href="/">
+        <span>🏠</span>
+        <small>خانه</small>
+      </a>
 
-        <a href="/messages">
-          <span>💬</span>
-          پیام
-        </a>
+      <a href="/search">
+        <span>🔎</span>
+        <small>جستجو</small>
+      </a>
 
-        <a href="/profile">
-          <span>👤</span>
-          پروفایل
-        </a>
-      </nav>
-    `
-    : "";
+      <a href="/new-post" class="nav-plus">
+        <span>＋</span>
+        <small>پست</small>
+      </a>
+
+      <a href="/messages">
+        <span>💬</span>
+        <small>پیام</small>
+      </a>
+
+      <a href="/profile">
+        <span>👤</span>
+        <small>پروفایل</small>
+      </a>
+
+    </nav>
+  ` : "";
 
   return `
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
+
 <head>
+
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<meta
+  name="viewport"
+  content="width=device-width, initial-scale=1.0"
+>
+
+<meta
+  name="theme-color"
+  content="#111827"
+>
 
 <title>${escapeHtml(title)}</title>
 
@@ -181,28 +204,38 @@ function layout(title, content, user) {
   box-sizing: border-box;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   margin: 0;
-  background: #eef1f5;
-  color: #202124;
+  background: #edf0f4;
+  color: #18202a;
   font-family: Tahoma, Arial, sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
 }
 
 .app {
   width: 100%;
-  max-width: 700px;
+  max-width: 720px;
   min-height: 100vh;
   margin: auto;
-  background: #f8f9fb;
-  padding-bottom: 90px;
+  background: #f8fafc;
+  padding-bottom: 95px;
 }
 
 .header {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: rgba(255,255,255,.97);
-  border-bottom: 1px solid #ddd;
+  background: rgba(255,255,255,.96);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid #e5e7eb;
   padding: 16px;
   text-align: center;
   font-size: 19px;
@@ -215,39 +248,40 @@ body {
 
 .card {
   background: white;
-  border: 1px solid #e0e4e8;
+  border: 1px solid #e4e7eb;
   border-radius: 18px;
-  padding: 15px;
+  padding: 16px;
   margin-bottom: 14px;
-  box-shadow: 0 3px 12px rgba(0,0,0,.04);
+  box-shadow: 0 5px 18px rgba(0,0,0,.04);
 }
 
 .row {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 12px;
 }
 
 .avatar {
-  width: 50px;
-  height: 50px;
-  min-width: 50px;
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
   border-radius: 50%;
-  background: #202124;
+  background: #111827;
   color: white;
   display: flex;
-  justify-content: center;
   align-items: center;
+  justify-content: center;
   font-size: 21px;
   font-weight: bold;
 }
 
 .name {
   font-weight: bold;
+  font-size: 15px;
 }
 
 .muted {
-  color: #777;
+  color: #737b86;
   font-size: 12px;
 }
 
@@ -257,17 +291,17 @@ body {
 }
 
 .text {
+  margin: 15px 0;
+  line-height: 1.9;
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.9;
-  margin: 15px 0;
 }
 
 .stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
-  color: #666;
+  gap: 16px;
+  color: #626b75;
   font-size: 13px;
 }
 
@@ -275,25 +309,26 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
-  margin-top: 12px;
+  margin-top: 13px;
 }
 
-.inline-form {
+.inline {
   display: inline;
   margin: 0;
 }
 
 button,
 .btn {
-  border: none;
-  border-radius: 11px;
-  padding: 10px 13px;
-  background: #202124;
-  color: white;
-  font-size: 14px;
-  text-decoration: none;
-  cursor: pointer;
   display: inline-block;
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: #111827;
+  color: white;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
 }
 
 button:hover,
@@ -301,50 +336,69 @@ button:hover,
   opacity: .9;
 }
 
-.pink {
-  background: #e91e63;
+.full {
+  width: 100%;
+  margin-top: 8px;
 }
 
 .blue {
-  background: #1976d2;
-}
-
-.purple {
-  background: #6a4c93;
+  background: #2563eb;
 }
 
 .green {
-  background: #16803c;
+  background: #15803d;
+}
+
+.pink {
+  background: #db2777;
+}
+
+.purple {
+  background: #7c3aed;
 }
 
 .red {
-  background: #b00020;
+  background: #b91c1c;
 }
 
 .gray {
-  background: #687078;
+  background: #64748b;
+}
+
+.orange {
+  background: #c2410c;
 }
 
 input,
 textarea,
 select {
   width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
   padding: 13px;
   margin: 6px 0;
-  border: 1px solid #ccd2d8;
-  border-radius: 11px;
-  font: inherit;
+  font-family: inherit;
+  font-size: 15px;
   background: white;
+  outline: none;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: #2563eb;
 }
 
 textarea {
-  min-height: 120px;
+  min-height: 125px;
   resize: vertical;
 }
 
-.full {
-  width: 100%;
-  margin-top: 7px;
+.top-grid {
+  display: grid;
+  grid-template-columns: repeat(2,1fr);
+  gap: 9px;
+  margin-top: 14px;
 }
 
 .menu {
@@ -358,92 +412,136 @@ textarea {
   text-align: center;
 }
 
+.media {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  border-radius: 15px;
+  margin-top: 10px;
+  background: #f1f5f9;
+}
+
+.comment {
+  background: #f1f5f9;
+  border-radius: 13px;
+  padding: 11px;
+  margin-top: 9px;
+}
+
+.comment-name {
+  font-weight: bold;
+}
+
+.job {
+  background: white;
+  border: 1px solid #e1e5ea;
+  border-radius: 16px;
+  padding: 15px;
+  margin-bottom: 12px;
+}
+
+.job-title {
+  font-size: 18px;
+  font-weight: bold;
+  margin-bottom: 9px;
+}
+
+.job-line {
+  margin: 6px 0;
+  color: #4b5563;
+}
+
+.job-description {
+  margin-top: 12px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.notice {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 14px;
+  padding: 13px;
+  line-height: 1.8;
+  margin-bottom: 12px;
+}
+
+.success {
+  color: #15803d;
+}
+
+.error {
+  color: #b91c1c;
+}
+
+.empty {
+  text-align: center;
+  color: #777;
+  padding: 35px 10px;
+}
+
+.badge {
+  display: inline-block;
+  background: #dc2626;
+  color: white;
+  border-radius: 20px;
+  padding: 3px 8px;
+  font-size: 10px;
+}
+
+.divider {
+  height: 1px;
+  background: #e5e7eb;
+  margin: 17px 0;
+}
+
 .bottom-nav {
   position: fixed;
+  z-index: 100;
   bottom: 0;
   left: 50%;
   transform: translateX(-50%);
   width: 100%;
-  max-width: 700px;
-  height: 72px;
-  background: white;
+  max-width: 720px;
+  height: 74px;
+  background: rgba(255,255,255,.98);
   border-top: 1px solid #ddd;
   display: flex;
   justify-content: space-around;
   align-items: center;
-  z-index: 100;
+  box-shadow: 0 -5px 18px rgba(0,0,0,.06);
 }
 
 .bottom-nav a {
-  text-decoration: none;
-  color: #555;
+  min-width: 58px;
   text-align: center;
-  font-size: 11px;
+  color: #5b6470;
 }
 
 .bottom-nav span {
   display: block;
-  font-size: 21px;
-  line-height: 29px;
+  font-size: 22px;
+  line-height: 27px;
 }
 
-.media {
-  max-width: 100%;
-  max-height: 500px;
-  border-radius: 13px;
-  margin-top: 8px;
+.bottom-nav small {
+  font-size: 10px;
 }
 
-.comment {
-  background: #f3f5f7;
-  border-radius: 12px;
-  padding: 10px;
-  margin-top: 8px;
+.nav-plus span {
+  font-size: 29px;
+  font-weight: bold;
 }
 
-.job {
-  border: 1px solid #ddd;
-  border-radius: 14px;
-  padding: 14px;
-  margin-bottom: 12px;
-  background: white;
-}
-
-.job h3 {
-  margin-top: 0;
-}
-
-.success {
-  color: #087f23;
-}
-
-.error {
-  color: #b00020;
-}
-
-.notice {
-  background: #f0f7ff;
-  border: 1px solid #d6e9ff;
-  border-radius: 13px;
-  padding: 12px;
-  line-height: 1.8;
-}
-
-.top-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
-  margin-top: 12px;
-}
-
-@media (max-width: 420px) {
+@media(max-width:450px) {
 
   .content {
     padding: 10px;
   }
 
   .card {
-    padding: 12px;
+    padding: 13px;
     border-radius: 15px;
   }
 
@@ -451,9 +549,15 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .actions button,
+  .actions .btn {
+    flex: 1;
+  }
+
 }
 
 </style>
+
 </head>
 
 <body>
@@ -473,17 +577,25 @@ textarea {
 ${nav}
 
 </body>
+
 </html>
 `;
 }
 
 function sendHtml(res, status, title, content, user = null) {
+
   res.writeHead(status, {
     "Content-Type": "text/html; charset=utf-8"
   });
 
-  res.end(layout(title, content, user));
+  res.end(
+    layout(title, content, user)
+  );
 }
+
+/* =========================
+   ساخت دیتابیس
+========================= */
 
 async function initDatabase() {
 
@@ -625,8 +737,12 @@ async function initDatabase() {
     )
   `);
 
-  console.log("Database initialized successfully.");
+  console.log("Database initialized.");
 }
+
+/* =========================
+   برنامه
+========================= */
 
 async function app(req, res) {
 
@@ -640,15 +756,171 @@ async function app(req, res) {
 
   try {
 
-    const user = await getSession(req);
+    const user = await getUser(req);
+
+    /* health */
 
     if (method === "GET" && path === "/health") {
+
       res.writeHead(200, {
         "Content-Type": "text/plain; charset=utf-8"
       });
 
       return res.end("OK");
     }
+
+    /* =====================
+       ثبت نام
+    ===================== */
+
+    if (method === "GET" && path === "/register") {
+
+      return sendHtml(
+        res,
+        200,
+        "ثبت‌نام",
+        `
+        <div class="card">
+
+          <h2>ساخت حساب جدید</h2>
+
+          <p class="muted">
+            حساب خودت را بساز و وارد برنامه شو.
+          </p>
+
+          <form method="post" action="/register">
+
+            <input
+              name="name"
+              placeholder="نام"
+              maxlength="100"
+              required
+            >
+
+            <input
+              name="email"
+              type="email"
+              placeholder="ایمیل"
+              required
+            >
+
+            <input
+              name="password"
+              type="password"
+              minlength="6"
+              placeholder="رمز عبور"
+              required
+            >
+
+            <button class="green full">
+              ثبت‌نام
+            </button>
+
+          </form>
+
+          <div class="divider"></div>
+
+          <a class="btn gray full" href="/login">
+            ورود به حساب
+          </a>
+
+        </div>
+        `
+      );
+    }
+
+    if (method === "POST" && path === "/register") {
+
+      const b = await readBody(req);
+
+      const name = (b.get("name") || "").trim();
+      const email = (b.get("email") || "")
+        .trim()
+        .toLowerCase();
+
+      const password = b.get("password") || "";
+
+      if (
+        !name ||
+        !email ||
+        password.length < 6
+      ) {
+
+        return sendHtml(
+          res,
+          400,
+          "خطا",
+          `
+          <div class="card error">
+            اطلاعات واردشده معتبر نیست.
+          </div>
+
+          <a class="btn" href="/register">
+            بازگشت
+          </a>
+          `
+        );
+      }
+
+      const exists = await pool.query(
+        "SELECT id FROM users WHERE email=$1",
+        [email]
+      );
+
+      if (exists.rowCount) {
+
+        return sendHtml(
+          res,
+          400,
+          "خطا",
+          `
+          <div class="card error">
+            این ایمیل قبلاً ثبت شده است.
+          </div>
+
+          <a class="btn" href="/login">
+            ورود
+          </a>
+          `
+        );
+      }
+
+      const result = await pool.query(
+        `
+        INSERT INTO users(name,email,password)
+        VALUES($1,$2,$3)
+        RETURNING id
+        `,
+        [
+          name,
+          email,
+          hashPassword(password)
+        ]
+      );
+
+      const sid = token();
+
+      await pool.query(
+        `
+        INSERT INTO sessions(session_id,user_id)
+        VALUES($1,$2)
+        `,
+        [
+          sid,
+          result.rows[0].id
+        ]
+      );
+
+      return redirect(
+        res,
+        "/",
+        sessionCookie(sid)
+      );
+    }
+
+    /* =====================
+       ورود
+    ===================== */
 
     if (method === "GET" && path === "/login") {
 
@@ -659,7 +931,7 @@ async function app(req, res) {
         `
         <div class="card">
 
-          <h2>ورود به حساب</h2>
+          <h2>خوش آمدی 👋</h2>
 
           <form method="post" action="/login">
 
@@ -683,135 +955,14 @@ async function app(req, res) {
 
           </form>
 
-          <p>
-            حساب نداری؟
-            <a href="/register">ثبت‌نام</a>
-          </p>
+          <div class="divider"></div>
 
-        </div>
-        `,
-        null
-      );
-    }
-
-    if (method === "GET" && path === "/register") {
-
-      return sendHtml(
-        res,
-        200,
-        "ثبت‌نام",
-        `
-        <div class="card">
-
-          <h2>ساخت حساب جدید</h2>
-
-          <form method="post" action="/register">
-
-            <input
-              name="name"
-              placeholder="نام"
-              required
-            >
-
-            <input
-              name="email"
-              type="email"
-              placeholder="ایمیل"
-              required
-            >
-
-            <input
-              name="password"
-              type="password"
-              minlength="6"
-              placeholder="رمز عبور، حداقل ۶ کاراکتر"
-              required
-            >
-
-            <button class="green full">
-              ثبت‌نام
-            </button>
-
-          </form>
-
-          <p>
-            حساب داری؟
-            <a href="/login">ورود</a>
-          </p>
-
-        </div>
-        `,
-        null
-      );
-    }
-
-    if (method === "POST" && path === "/register") {
-
-      const b = await readBody(req);
-
-      const name = (b.get("name") || "").trim();
-      const email = (b.get("email") || "").trim().toLowerCase();
-      const password = b.get("password") || "";
-
-      if (!name || !email || password.length < 6) {
-        return sendHtml(
-          res,
-          400,
-          "خطا",
-          `<div class="card error">اطلاعات واردشده معتبر نیست.</div>`,
-          null
-        );
-      }
-
-      const exists = await pool.query(
-        "SELECT id FROM users WHERE email = $1",
-        [email]
-      );
-
-      if (exists.rowCount) {
-        return sendHtml(
-          res,
-          400,
-          "خطا",
-          `
-          <div class="card error">
-            این ایمیل قبلاً ثبت شده است.
-          </div>
-
-          <a class="btn" href="/register">
-            بازگشت
+          <a class="btn gray full" href="/register">
+            ساخت حساب جدید
           </a>
-          `,
-          null
-        );
-      }
 
-      const result = await pool.query(
-        `INSERT INTO users(name,email,password)
-         VALUES($1,$2,$3)
-         RETURNING id`,
-        [
-          name,
-          email,
-          hashPassword(password)
-        ]
-      );
-
-      const sessionId = createToken();
-
-      await pool.query(
-        `INSERT INTO sessions(session_id,user_id)
-         VALUES($1,$2)`,
-        [
-          sessionId,
-          result.rows[0].id
-        ]
-      );
-
-      return redirect(
-        res,
-        "/",
-        setSessionCookie(sessionId)
+        </div>
+        `
       );
     }
 
@@ -826,9 +977,11 @@ async function app(req, res) {
       const password = b.get("password") || "";
 
       const result = await pool.query(
-        `SELECT id
-         FROM users
-         WHERE email=$1 AND password=$2`,
+        `
+        SELECT id
+        FROM users
+        WHERE email=$1 AND password=$2
+        `,
         [
           email,
           hashPassword(password)
@@ -836,6 +989,7 @@ async function app(req, res) {
       );
 
       if (!result.rowCount) {
+
         return sendHtml(
           res,
           401,
@@ -848,18 +1002,19 @@ async function app(req, res) {
           <a class="btn" href="/login">
             بازگشت
           </a>
-          `,
-          null
+          `
         );
       }
 
-      const sessionId = createToken();
+      const sid = token();
 
       await pool.query(
-        `INSERT INTO sessions(session_id,user_id)
-         VALUES($1,$2)`,
+        `
+        INSERT INTO sessions(session_id,user_id)
+        VALUES($1,$2)
+        `,
         [
-          sessionId,
+          sid,
           result.rows[0].id
         ]
       );
@@ -867,31 +1022,44 @@ async function app(req, res) {
       return redirect(
         res,
         "/",
-        setSessionCookie(sessionId)
+        sessionCookie(sid)
       );
     }
+
+    /* =====================
+       نیاز به ورود
+    ===================== */
 
     if (!user) {
       return redirect(res, "/login");
     }
 
+    /* =====================
+       خروج
+    ===================== */
+
     if (method === "POST" && path === "/logout") {
 
-      const sessionId = parseCookies(req).sessionId;
+      const sid = parseCookies(req).sessionId;
 
-      if (sessionId) {
+      if (sid) {
+
         await pool.query(
           "DELETE FROM sessions WHERE session_id=$1",
-          [sessionId]
+          [sid]
         );
       }
 
       return redirect(
         res,
         "/login",
-        clearSessionCookie()
+        clearCookie()
       );
     }
+
+    /* =====================
+       خانه
+    ===================== */
 
     if (method === "GET" && path === "/") {
 
@@ -916,15 +1084,15 @@ async function app(req, res) {
           EXISTS(
             SELECT 1
             FROM likes l
-            WHERE l.post_id=p.id
-              AND l.user_id=$1
+            WHERE l.user_id=$1
+              AND l.post_id=p.id
           ) AS liked,
 
           EXISTS(
             SELECT 1
             FROM saved_posts s
-            WHERE s.post_id=p.id
-              AND s.user_id=$1
+            WHERE s.user_id=$1
+              AND s.post_id=p.id
           ) AS saved
 
         FROM posts p
@@ -946,7 +1114,18 @@ async function app(req, res) {
         [user.id]
       );
 
+      const unread = await pool.query(
+        `
+        SELECT COUNT(*)::int AS count
+        FROM notifications
+        WHERE user_id=$1
+          AND read=false
+        `,
+        [user.id]
+      );
+
       let content = `
+
         <div class="card">
 
           <div class="row">
@@ -954,6 +1133,7 @@ async function app(req, res) {
             ${avatar(user.name)}
 
             <div>
+
               <div class="name">
                 ${escapeHtml(user.name)}
               </div>
@@ -961,141 +1141,171 @@ async function app(req, res) {
               <div class="muted ltr">
                 ${escapeHtml(user.email)}
               </div>
+
             </div>
 
           </div>
 
           <div class="top-grid">
 
-            <a class="btn" href="/new-post">
+            <a class="btn green" href="/new-post">
               ➕ انتشار پست
             </a>
 
-            <a class="btn gray" href="/jobs">
+            <a class="btn orange" href="/jobs">
               💼 کاریابی
             </a>
 
           </div>
 
         </div>
+
       `;
+
+      if (unread.rows[0].count > 0) {
+
+        content += `
+          <a href="/notifications" class="notice">
+            🔔 شما
+            <span class="badge">
+              ${unread.rows[0].count}
+            </span>
+            اعلان خوانده‌نشده دارید.
+          </a>
+        `;
+      }
 
       for (const post of posts.rows) {
 
         content += `
-          <article class="card">
 
-            <div class="row">
+        <article class="card">
 
-              ${avatar(post.name)}
+          <div class="row">
 
-              <div>
+            ${avatar(post.name)}
 
-                <div class="name">
-                  <a href="/user?id=${post.user_id}">
-                    ${escapeHtml(post.name)}
-                  </a>
-                </div>
+            <div>
 
-                <div class="muted">
-                  ${new Date(post.created_at).toLocaleString("fa-IR")}
-                </div>
+              <div class="name">
+                <a href="/user?id=${post.user_id}">
+                  ${escapeHtml(post.name)}
+                </a>
+              </div>
 
+              <div class="muted">
+                ${new Date(post.created_at).toLocaleString("fa-IR")}
               </div>
 
             </div>
 
-            <div class="text">
-              ${escapeHtml(post.content)}
-            </div>
+          </div>
+
+          <div class="text">
+            ${escapeHtml(post.content)}
+          </div>
+
+          ${
+            post.media_url
+              ? `
+              <a
+                href="${escapeHtml(post.media_url)}"
+                target="_blank"
+                rel="noopener"
+              >
+                <img
+                  class="media"
+                  src="${escapeHtml(post.media_url)}"
+                  alt="رسانه"
+                >
+              </a>
+              `
+              : ""
+          }
+
+          <div class="stats">
+
+            <span>
+              ❤️ ${post.likes}
+            </span>
+
+            <span>
+              💬 ${post.comments}
+            </span>
 
             ${
-              post.media_url
-                ? `
-                  <a
-                    href="${escapeHtml(post.media_url)}"
-                    target="_blank"
-                    rel="noopener"
-                  >
-                    <img
-                      class="media"
-                      src="${escapeHtml(post.media_url)}"
-                      alt="رسانه پست"
-                    >
-                  </a>
-                `
+              post.saved
+                ? `<span>🔖 ذخیره شده</span>`
                 : ""
             }
 
-            <div class="stats">
+          </div>
 
-              <span>
-                ❤️ ${post.likes}
-              </span>
+          <div class="actions">
 
-              <span>
-                💬 ${post.comments}
-              </span>
+            ${buttonForm(
+              `/like?id=${post.id}`,
+              post.liked
+                ? "💔 لغو لایک"
+                : "❤️ لایک",
+              "pink"
+            )}
 
-            </div>
+            ${buttonForm(
+              `/save?id=${post.id}`,
+              post.saved
+                ? "🔖 حذف ذخیره"
+                : "🔖 ذخیره",
+              "purple"
+            )}
 
-            <div class="actions">
+            <a
+              class="btn gray"
+              href="/post?id=${post.id}"
+            >
+              💬 نظر
+            </a>
 
-              ${formButton(
-                `/like?id=${post.id}`,
-                post.liked ? "💔 لغو لایک" : "❤️ لایک",
-                "pink"
-              )}
+            ${
+              post.user_id === user.id
+                ? `
+                <a
+                  class="btn"
+                  href="/edit-post?id=${post.id}"
+                >
+                  ✏️ ویرایش
+                </a>
 
-              ${formButton(
-                `/save?id=${post.id}`,
-                post.saved ? "🔖 حذف ذخیره" : "🔖 ذخیره",
-                "purple"
-              )}
+                ${buttonForm(
+                  `/delete-post?id=${post.id}`,
+                  "🗑️ حذف",
+                  "red"
+                )}
+                `
+                : `
+                <a
+                  class="btn gray"
+                  href="/report?post=${post.id}"
+                >
+                  🚩 گزارش
+                </a>
+                `
+            }
 
-              <a
-                class="btn gray"
-                href="/post?id=${post.id}"
-              >
-                💬 نظر
-              </a>
+          </div>
 
-              ${
-                post.user_id === user.id
-                  ? `
-                    <a
-                      class="btn"
-                      href="/edit-post?id=${post.id}"
-                    >
-                      ✏️ ویرایش
-                    </a>
+        </article>
 
-                    ${formButton(
-                      `/delete-post?id=${post.id}`,
-                      "🗑️ حذف",
-                      "red"
-                    )}
-                  `
-                  : ""
-              }
-
-              <a
-                class="btn gray"
-                href="/report?post=${post.id}"
-              >
-                🚩 گزارش
-              </a>
-
-            </div>
-
-          </article>
         `;
       }
 
       if (!posts.rowCount) {
+
         content += `
-          <div class="card muted">
+          <div class="card empty">
             هنوز پستی منتشر نشده است.
+            <br><br>
+            اولین پست را تو منتشر کن 👋
           </div>
         `;
       }
@@ -1109,12 +1319,16 @@ async function app(req, res) {
       );
     }
 
+    /* =====================
+       پست جدید
+    ===================== */
+
     if (method === "GET" && path === "/new-post") {
 
       return sendHtml(
         res,
         200,
-        "پست جدید",
+        "انتشار پست",
         `
         <div class="card">
 
@@ -1123,7 +1337,7 @@ async function app(req, res) {
             <textarea
               name="content"
               maxlength="5000"
-              placeholder="چه خبر؟"
+              placeholder="چه خبر؟ چیزی برای اشتراک‌گذاری بنویس..."
               required
             ></textarea>
 
@@ -1134,7 +1348,7 @@ async function app(req, res) {
             >
 
             <button class="green full">
-              انتشار پست
+              🚀 انتشار پست
             </button>
 
           </form>
@@ -1149,16 +1363,21 @@ async function app(req, res) {
 
       const b = await readBody(req);
 
-      const content = (b.get("content") || "").trim();
-      const media = (b.get("media_url") || "").trim() || null;
+      const content =
+        (b.get("content") || "").trim();
+
+      const media =
+        (b.get("media_url") || "").trim() || null;
 
       if (!content) {
         return redirect(res, "/new-post");
       }
 
       await pool.query(
-        `INSERT INTO posts(user_id,content,media_url)
-         VALUES($1,$2,$3)`,
+        `
+        INSERT INTO posts(user_id,content,media_url)
+        VALUES($1,$2,$3)
+        `,
         [
           user.id,
           content,
@@ -1169,12 +1388,22 @@ async function app(req, res) {
       return redirect(res, "/");
     }
 
+    /* =====================
+       لایک
+    ===================== */
+
     if (method === "POST" && path === "/like") {
 
-      const id = Number(url.searchParams.get("id"));
+      const id = Number(
+        url.searchParams.get("id")
+      );
 
       const post = await pool.query(
-        "SELECT user_id FROM posts WHERE id=$1",
+        `
+        SELECT user_id
+        FROM posts
+        WHERE id=$1
+        `,
         [id]
       );
 
@@ -1183,9 +1412,12 @@ async function app(req, res) {
       }
 
       const existing = await pool.query(
-        `SELECT 1
-         FROM likes
-         WHERE user_id=$1 AND post_id=$2`,
+        `
+        SELECT 1
+        FROM likes
+        WHERE user_id=$1
+          AND post_id=$2
+        `,
         [
           user.id,
           id
@@ -1195,8 +1427,11 @@ async function app(req, res) {
       if (existing.rowCount) {
 
         await pool.query(
-          `DELETE FROM likes
-           WHERE user_id=$1 AND post_id=$2`,
+          `
+          DELETE FROM likes
+          WHERE user_id=$1
+            AND post_id=$2
+          `,
           [
             user.id,
             id
@@ -1206,9 +1441,11 @@ async function app(req, res) {
       } else {
 
         await pool.query(
-          `INSERT INTO likes(user_id,post_id)
-           VALUES($1,$2)
-           ON CONFLICT DO NOTHING`,
+          `
+          INSERT INTO likes(user_id,post_id)
+          VALUES($1,$2)
+          ON CONFLICT DO NOTHING
+          `,
           [
             user.id,
             id
@@ -1235,14 +1472,23 @@ async function app(req, res) {
       return redirect(res, "/");
     }
 
+    /* =====================
+       ذخیره
+    ===================== */
+
     if (method === "POST" && path === "/save") {
 
-      const id = Number(url.searchParams.get("id"));
+      const id = Number(
+        url.searchParams.get("id")
+      );
 
       const existing = await pool.query(
-        `SELECT 1
-         FROM saved_posts
-         WHERE user_id=$1 AND post_id=$2`,
+        `
+        SELECT 1
+        FROM saved_posts
+        WHERE user_id=$1
+          AND post_id=$2
+        `,
         [
           user.id,
           id
@@ -1252,8 +1498,11 @@ async function app(req, res) {
       if (existing.rowCount) {
 
         await pool.query(
-          `DELETE FROM saved_posts
-           WHERE user_id=$1 AND post_id=$2`,
+          `
+          DELETE FROM saved_posts
+          WHERE user_id=$1
+            AND post_id=$2
+          `,
           [
             user.id,
             id
@@ -1263,9 +1512,11 @@ async function app(req, res) {
       } else {
 
         await pool.query(
-          `INSERT INTO saved_posts(user_id,post_id)
-           VALUES($1,$2)
-           ON CONFLICT DO NOTHING`,
+          `
+          INSERT INTO saved_posts(user_id,post_id)
+          VALUES($1,$2)
+          ON CONFLICT DO NOTHING
+          `,
           [
             user.id,
             id
@@ -1276,11 +1527,17 @@ async function app(req, res) {
       return redirect(res, "/");
     }
 
+    /* =====================
+       صفحه پست + نظرات
+    ===================== */
+
     if (method === "GET" && path === "/post") {
 
-      const id = Number(url.searchParams.get("id"));
+      const id = Number(
+        url.searchParams.get("id")
+      );
 
-      const post = await pool.query(
+      const result = await pool.query(
         `
         SELECT
           p.*,
@@ -1288,8 +1545,8 @@ async function app(req, res) {
 
           (
             SELECT COUNT(*)
-            FROM likes l
-            WHERE l.post_id=p.id
+            FROM likes
+            WHERE post_id=p.id
           )::int AS likes
 
         FROM posts p
@@ -1302,17 +1559,22 @@ async function app(req, res) {
         [id]
       );
 
-      if (!post.rowCount) {
+      if (!result.rowCount) {
+
         return sendHtml(
           res,
           404,
           "پست",
-          `<div class="card">پست پیدا نشد.</div>`,
+          `
+          <div class="card empty">
+            پست پیدا نشد.
+          </div>
+          `,
           user
         );
       }
 
-      const p = post.rows[0];
+      const post = result.rows[0];
 
       const comments = await pool.query(
         `
@@ -1333,57 +1595,71 @@ async function app(req, res) {
       );
 
       let content = `
+
         <div class="card">
 
           <div class="row">
 
-            ${avatar(p.name)}
+            ${avatar(post.name)}
 
-            <div class="name">
-              ${escapeHtml(p.name)}
+            <div>
+
+              <div class="name">
+                ${escapeHtml(post.name)}
+              </div>
+
+              <div class="muted">
+                ${new Date(post.created_at).toLocaleString("fa-IR")}
+              </div>
+
             </div>
 
           </div>
 
           <div class="text">
-            ${escapeHtml(p.content)}
+            ${escapeHtml(post.content)}
           </div>
 
           ${
-            p.media_url
+            post.media_url
               ? `
-                <a
-                  href="${escapeHtml(p.media_url)}"
-                  target="_blank"
-                  rel="noopener"
+              <a
+                href="${escapeHtml(post.media_url)}"
+                target="_blank"
+                rel="noopener"
+              >
+                <img
+                  class="media"
+                  src="${escapeHtml(post.media_url)}"
                 >
-                  <img
-                    class="media"
-                    src="${escapeHtml(p.media_url)}"
-                  >
-                </a>
+              </a>
               `
               : ""
           }
 
           <div class="stats">
-            ❤️ ${p.likes}
+            ❤️ ${post.likes}
           </div>
 
         </div>
 
         <div class="card">
 
-          <form method="post" action="/comment?id=${id}">
+          <h3>💬 نظرات</h3>
+
+          <form
+            method="post"
+            action="/comment?id=${id}"
+          >
 
             <textarea
               name="content"
               maxlength="2000"
-              placeholder="نظر بنویس..."
+              placeholder="نظر خودت را بنویس..."
               required
             ></textarea>
 
-            <button>
+            <button class="blue">
               ارسال نظر
             </button>
 
@@ -1397,9 +1673,15 @@ async function app(req, res) {
         content += `
           <div class="comment">
 
-            <b>
+            <div class="comment-name">
               ${escapeHtml(comment.name)}
-            </b>
+            </div>
+
+            <div class="muted">
+              ${new Date(
+                comment.created_at
+              ).toLocaleString("fa-IR")}
+            </div>
 
             <div class="text">
               ${escapeHtml(comment.content)}
@@ -1420,16 +1702,23 @@ async function app(req, res) {
 
     if (method === "POST" && path === "/comment") {
 
-      const id = Number(url.searchParams.get("id"));
+      const id = Number(
+        url.searchParams.get("id")
+      );
 
       const b = await readBody(req);
 
-      const comment = (b.get("content") || "").trim();
+      const content =
+        (b.get("content") || "").trim();
 
-      if (comment) {
+      if (content) {
 
         const post = await pool.query(
-          "SELECT user_id FROM posts WHERE id=$1",
+          `
+          SELECT user_id
+          FROM posts
+          WHERE id=$1
+          `,
           [id]
         );
 
@@ -1437,13 +1726,14 @@ async function app(req, res) {
 
           await pool.query(
             `
-            INSERT INTO comments(user_id,post_id,content)
+            INSERT INTO comments
+            (user_id,post_id,content)
             VALUES($1,$2,$3)
             `,
             [
               user.id,
               id,
-              comment
+              content
             ]
           );
 
@@ -1465,17 +1755,29 @@ async function app(req, res) {
         }
       }
 
-      return redirect(res, `/post?id=${id}`);
+      return redirect(
+        res,
+        `/post?id=${id}`
+      );
     }
+
+    /* =====================
+       ویرایش پست
+    ===================== */
 
     if (method === "GET" && path === "/edit-post") {
 
-      const id = Number(url.searchParams.get("id"));
+      const id = Number(
+        url.searchParams.get("id")
+      );
 
       const result = await pool.query(
-        `SELECT *
-         FROM posts
-         WHERE id=$1 AND user_id=$2`,
+        `
+        SELECT *
+        FROM posts
+        WHERE id=$1
+          AND user_id=$2
+        `,
         [
           id,
           user.id
@@ -1486,7 +1788,7 @@ async function app(req, res) {
         return redirect(res, "/");
       }
 
-      const p = result.rows[0];
+      const post = result.rows[0];
 
       return sendHtml(
         res,
@@ -1495,22 +1797,27 @@ async function app(req, res) {
         `
         <div class="card">
 
-          <form method="post" action="/edit-post?id=${id}">
+          <form
+            method="post"
+            action="/edit-post?id=${id}"
+          >
 
             <textarea
               name="content"
               required
-            >${escapeHtml(p.content)}</textarea>
+            >${escapeHtml(post.content)}</textarea>
 
             <input
               name="media_url"
               type="url"
-              value="${escapeHtml(p.media_url || "")}"
+              value="${escapeHtml(
+                post.media_url || ""
+              )}"
               placeholder="لینک رسانه"
             >
 
-            <button>
-              ذخیره تغییرات
+            <button class="blue">
+              💾 ذخیره تغییرات
             </button>
 
           </form>
@@ -1523,20 +1830,27 @@ async function app(req, res) {
 
     if (method === "POST" && path === "/edit-post") {
 
-      const id = Number(url.searchParams.get("id"));
+      const id = Number(
+        url.searchParams.get("id")
+      );
 
       const b = await readBody(req);
 
-      const content = (b.get("content") || "").trim();
-      const media = (b.get("media_url") || "").trim() || null;
+      const content =
+        (b.get("content") || "").trim();
+
+      const media =
+        (b.get("media_url") || "").trim() || null;
 
       if (content) {
 
         await pool.query(
           `
           UPDATE posts
-          SET content=$1, media_url=$2
-          WHERE id=$3 AND user_id=$4
+          SET content=$1,
+              media_url=$2
+          WHERE id=$3
+            AND user_id=$4
           `,
           [
             content,
@@ -1550,14 +1864,21 @@ async function app(req, res) {
       return redirect(res, "/");
     }
 
+    /* =====================
+       حذف پست
+    ===================== */
+
     if (method === "POST" && path === "/delete-post") {
 
-      const id = Number(url.searchParams.get("id"));
+      const id = Number(
+        url.searchParams.get("id")
+      );
 
       await pool.query(
         `
         DELETE FROM posts
-        WHERE id=$1 AND user_id=$2
+        WHERE id=$1
+          AND user_id=$2
         `,
         [
           id,
@@ -1568,64 +1889,74 @@ async function app(req, res) {
       return redirect(res, "/");
     }
 
+    /* =====================
+       جستجو
+    ===================== */
+
     if (method === "GET" && path === "/search") {
 
-      const q = (url.searchParams.get("q") || "").trim();
+      const q =
+        (url.searchParams.get("q") || "").trim();
 
       let content = `
+
         <div class="card">
+
+          <h3>🔎 جستجوی کاربران</h3>
 
           <form method="get" action="/search">
 
             <input
               name="q"
               value="${escapeHtml(q)}"
-              placeholder="جستجوی نام یا ایمیل"
+              placeholder="نام یا ایمیل..."
             >
 
-            <button>
+            <button class="blue">
               جستجو
             </button>
 
           </form>
 
         </div>
+
       `;
 
       if (q) {
 
-        const results = await pool.query(
+        const result = await pool.query(
           `
           SELECT id,name,email
           FROM users
-
           WHERE name ILIKE $1
              OR email ILIKE $1
-
           ORDER BY name
-
           LIMIT 30
           `,
           [`%${q}%`]
         );
 
-        for (const person of results.rows) {
+        for (const person of result.rows) {
 
           content += `
-            <div class="card row">
+            <div class="card">
 
-              ${avatar(person.name)}
+              <div class="row">
 
-              <div>
+                ${avatar(person.name)}
 
-                <b>
-                  <a href="/user?id=${person.id}">
-                    ${escapeHtml(person.name)}
-                  </a>
-                </b>
+                <div>
 
-                <div class="muted ltr">
-                  ${escapeHtml(person.email)}
+                  <div class="name">
+                    <a href="/user?id=${person.id}">
+                      ${escapeHtml(person.name)}
+                    </a>
+                  </div>
+
+                  <div class="muted ltr">
+                    ${escapeHtml(person.email)}
+                  </div>
+
                 </div>
 
               </div>
@@ -1634,10 +1965,10 @@ async function app(req, res) {
           `;
         }
 
-        if (!results.rowCount) {
+        if (!result.rowCount) {
 
           content += `
-            <div class="card muted">
+            <div class="card empty">
               نتیجه‌ای پیدا نشد.
             </div>
           `;
@@ -1653,9 +1984,15 @@ async function app(req, res) {
       );
     }
 
+    /* =====================
+       پروفایل کاربر
+    ===================== */
+
     if (method === "GET" && path === "/user") {
 
-      const id = Number(url.searchParams.get("id"));
+      const id = Number(
+        url.searchParams.get("id")
+      );
 
       const person = await pool.query(
         `
@@ -1672,7 +2009,11 @@ async function app(req, res) {
           res,
           404,
           "کاربر",
-          `<div class="card">کاربر پیدا نشد.</div>`,
+          `
+          <div class="card empty">
+            کاربر پیدا نشد.
+          </div>
+          `,
           user
         );
       }
@@ -1692,18 +2033,28 @@ async function app(req, res) {
         ]
       );
 
-      const posts = await pool.query(
+      const followers = await pool.query(
+        `
+        SELECT COUNT(*)::int AS count
+        FROM follows
+        WHERE following_id=$1
+        `,
+        [id]
+      );
+
+      const targetPosts = await pool.query(
         `
         SELECT *
         FROM posts
         WHERE user_id=$1
         ORDER BY created_at DESC
-        LIMIT 20
+        LIMIT 30
         `,
         [id]
       );
 
       let content = `
+
         <div class="card">
 
           <div class="row">
@@ -1724,51 +2075,67 @@ async function app(req, res) {
 
           </div>
 
+          <div class="stats" style="margin-top:15px">
+
+            <span>
+              👥 ${followers.rows[0].count}
+              دنبال‌کننده
+            </span>
+
+          </div>
+
           ${
             id !== user.id
               ? `
-                <div class="actions">
+              <div class="actions">
 
-                  ${formButton(
-                    `/follow?id=${id}`,
-                    following.rowCount
-                      ? "➖ لغو دنبال"
-                      : "➕ دنبال کردن",
-                    "blue"
-                  )}
+                ${buttonForm(
+                  `/follow?id=${id}`,
+                  following.rowCount
+                    ? "➖ لغو دنبال"
+                    : "➕ دنبال کردن",
+                  "blue"
+                )}
 
-                  <a
-                    class="btn"
-                    href="/messages?user=${id}"
-                  >
-                    💬 پیام
-                  </a>
+                <a
+                  class="btn"
+                  href="/messages?user=${id}"
+                >
+                  💬 پیام
+                </a>
 
-                  <a
-                    class="btn red"
-                    href="/report?user=${id}"
-                  >
-                    🚩 گزارش
-                  </a>
+                <a
+                  class="btn gray"
+                  href="/report?user=${id}"
+                >
+                  🚩 گزارش
+                </a>
 
-                  ${formButton(
-                    `/block?id=${id}`,
-                    "🚫 مسدود کردن",
-                    "red"
-                  )}
+                ${buttonForm(
+                  `/block?id=${id}`,
+                  "🚫 مسدود کردن",
+                  "red"
+                )}
 
-                </div>
+              </div>
               `
               : ""
           }
 
         </div>
+
       `;
 
-      for (const post of posts.rows) {
+      for (const post of targetPosts.rows) {
 
         content += `
           <div class="card">
+
+            <div class="muted">
+              ${new Date(
+                post.created_at
+              ).toLocaleString("fa-IR")}
+            </div>
 
             <div class="text">
               ${escapeHtml(post.content)}
@@ -1777,10 +2144,10 @@ async function app(req, res) {
             ${
               post.media_url
                 ? `
-                  <img
-                    class="media"
-                    src="${escapeHtml(post.media_url)}"
-                  >
+                <img
+                  class="media"
+                  src="${escapeHtml(post.media_url)}"
+                >
                 `
                 : ""
             }
@@ -1789,7 +2156,7 @@ async function app(req, res) {
               class="btn gray"
               href="/post?id=${post.id}"
             >
-              مشاهده پست
+              💬 مشاهده پست
             </a>
 
           </div>
@@ -1805,9 +2172,15 @@ async function app(req, res) {
       );
     }
 
+    /* =====================
+       دنبال کردن
+    ===================== */
+
     if (method === "POST" && path === "/follow") {
 
-      const id = Number(url.searchParams.get("id"));
+      const id = Number(
+        url.searchParams.get("id")
+      );
 
       if (id !== user.id) {
 
@@ -1867,20 +2240,44 @@ async function app(req, res) {
         }
       }
 
-      return redirect(res, `/user?id=${id}`);
+      return redirect(
+        res,
+        `/user?id=${id}`
+      );
     }
+
+    /* =====================
+       مسدود کردن
+    ===================== */
 
     if (method === "POST" && path === "/block") {
 
-      const id = Number(url.searchParams.get("id"));
+      const id = Number(
+        url.searchParams.get("id")
+      );
 
       if (id !== user.id) {
 
         await pool.query(
           `
-          INSERT INTO blocks(blocker_id,blocked_id)
+          INSERT INTO blocks
+          (blocker_id,blocked_id)
           VALUES($1,$2)
           ON CONFLICT DO NOTHING
+          `,
+          [
+            user.id,
+            id
+          ]
+        );
+
+        await pool.query(
+          `
+          DELETE FROM follows
+          WHERE
+            (follower_id=$1 AND following_id=$2)
+            OR
+            (follower_id=$2 AND following_id=$1)
           `,
           [
             user.id,
@@ -1892,29 +2289,39 @@ async function app(req, res) {
       return redirect(res, "/");
     }
 
+    /* =====================
+       پروفایل من
+    ===================== */
+
     if (method === "GET" && path === "/profile") {
 
       const stats = await pool.query(
         `
         SELECT
 
-          (
-            SELECT COUNT(*)
-            FROM posts
-            WHERE user_id=$1
-          )::int AS posts,
+        (
+          SELECT COUNT(*)
+          FROM posts
+          WHERE user_id=$1
+        )::int AS posts,
 
-          (
-            SELECT COUNT(*)
-            FROM follows
-            WHERE following_id=$1
-          )::int AS followers,
+        (
+          SELECT COUNT(*)
+          FROM follows
+          WHERE following_id=$1
+        )::int AS followers,
 
-          (
-            SELECT COUNT(*)
-            FROM follows
-            WHERE follower_id=$1
-          )::int AS following
+        (
+          SELECT COUNT(*)
+          FROM follows
+          WHERE follower_id=$1
+        )::int AS following,
+
+        (
+          SELECT COUNT(*)
+          FROM saved_posts
+          WHERE user_id=$1
+        )::int AS saved
         `,
         [user.id]
       );
@@ -1946,18 +2353,22 @@ async function app(req, res) {
 
           </div>
 
-          <div class="stats" style="margin-top:15px">
+          <div class="stats" style="margin-top:18px">
 
             <span>
-              پست: ${s.posts}
+              📝 پست: ${s.posts}
             </span>
 
             <span>
-              دنبال‌کننده: ${s.followers}
+              👥 دنبال‌کننده: ${s.followers}
             </span>
 
             <span>
-              دنبال‌شده: ${s.following}
+              ➕ دنبال‌شده: ${s.following}
+            </span>
+
+            <span>
+              🔖 ذخیره: ${s.saved}
             </span>
 
           </div>
@@ -1978,7 +2389,7 @@ async function app(req, res) {
             🔔 اعلان‌ها
           </a>
 
-          <a class="btn gray" href="/jobs">
+          <a class="btn orange" href="/jobs">
             💼 کاریابی
           </a>
 
@@ -1988,7 +2399,7 @@ async function app(req, res) {
 
           <form method="post" action="/logout">
             <button class="red">
-              خروج
+              🚪 خروج از حساب
             </button>
           </form>
 
@@ -1998,7 +2409,14 @@ async function app(req, res) {
       );
     }
 
-    if (method === "GET" && path === "/edit-profile") {
+    /* =====================
+       ویرایش پروفایل
+    ===================== */
+
+    if (
+      method === "GET" &&
+      path === "/edit-profile"
+    ) {
 
       return sendHtml(
         res,
@@ -2007,16 +2425,20 @@ async function app(req, res) {
         `
         <div class="card">
 
-          <form method="post" action="/edit-profile">
+          <form
+            method="post"
+            action="/edit-profile"
+          >
 
             <input
               name="name"
               value="${escapeHtml(user.name)}"
+              maxlength="100"
               required
             >
 
-            <button>
-              ذخیره تغییرات
+            <button class="blue">
+              💾 ذخیره
             </button>
 
           </form>
@@ -2027,11 +2449,15 @@ async function app(req, res) {
       );
     }
 
-    if (method === "POST" && path === "/edit-profile") {
+    if (
+      method === "POST" &&
+      path === "/edit-profile"
+    ) {
 
       const b = await readBody(req);
 
-      const name = (b.get("name") || "").trim();
+      const name =
+        (b.get("name") || "").trim();
 
       if (name) {
 
@@ -2048,111 +2474,15 @@ async function app(req, res) {
         );
       }
 
-      return redirect(res, "/profile");
-    }
-
-    if (method === "GET" && path === "/change-password") {
-
-      return sendHtml(
+      return redirect(
         res,
-        200,
-        "تغییر رمز",
-        `
-        <div class="card">
-
-          <form method="post" action="/change-password">
-
-            <input
-              name="old"
-              type="password"
-              placeholder="رمز فعلی"
-              required
-            >
-
-            <input
-              name="new"
-              type="password"
-              minlength="6"
-              placeholder="رمز جدید"
-              required
-            >
-
-            <button>
-              تغییر رمز
-            </button>
-
-          </form>
-
-        </div>
-        `,
-        user
+        "/profile"
       );
     }
 
-    if (method === "POST" && path === "/change-password") {
-
-      const b = await readBody(req);
-
-      const oldPassword = b.get("old") || "";
-      const newPassword = b.get("new") || "";
-
-      const check = await pool.query(
-        `
-        SELECT id
-        FROM users
-        WHERE id=$1
-          AND password=$2
-        `,
-        [
-          user.id,
-          hashPassword(oldPassword)
-        ]
-      );
-
-      if (!check.rowCount) {
-
-        return sendHtml(
-          res,
-          400,
-          "خطا",
-          `
-          <div class="card error">
-            رمز فعلی اشتباه است.
-          </div>
-          `,
-          user
-        );
-      }
-
-      if (newPassword.length < 6) {
-
-        return sendHtml(
-          res,
-          400,
-          "خطا",
-          `
-          <div class="card error">
-            رمز جدید باید حداقل ۶ کاراکتر باشد.
-          </div>
-          `,
-          user
-        );
-      }
-
-      await pool.query(
-        `
-        UPDATE users
-        SET password=$1
-        WHERE id=$2
-        `,
-        [
-          hashPassword(newPassword),
-          user.id
-        ]
-      );
-
-      return redirect(res, "/profile");
-    }
+    /* =====================
+       ذخیره‌شده‌ها
+    ===================== */
 
     if (method === "GET" && path === "/saved") {
 
@@ -2184,19 +2514,25 @@ async function app(req, res) {
         content += `
           <div class="card">
 
-            <b>
-              ${escapeHtml(post.name)}
-            </b>
+            <div class="row">
+
+              ${avatar(post.name)}
+
+              <b>
+                ${escapeHtml(post.name)}
+              </b>
+
+            </div>
 
             <div class="text">
               ${escapeHtml(post.content)}
             </div>
 
             <a
-              class="btn"
+              class="btn gray"
               href="/post?id=${post.id}"
             >
-              مشاهده
+              مشاهده پست
             </a>
 
           </div>
@@ -2206,8 +2542,8 @@ async function app(req, res) {
       if (!result.rowCount) {
 
         content = `
-          <div class="card muted">
-            هنوز پستی ذخیره نکرده‌ای.
+          <div class="card empty">
+            🔖 هنوز پستی ذخیره نکرده‌ای.
           </div>
         `;
       }
@@ -2221,7 +2557,14 @@ async function app(req, res) {
       );
     }
 
-    if (method === "GET" && path === "/notifications") {
+    /* =====================
+       اعلان‌ها
+    ===================== */
+
+    if (
+      method === "GET" &&
+      path === "/notifications"
+    ) {
 
       const result = await pool.query(
         `
@@ -2254,23 +2597,23 @@ async function app(req, res) {
 
       let content = "";
 
-      for (const notification of result.rows) {
+      for (const n of result.rows) {
 
-        let text = "یک اعلان جدید داری.";
+        let text = "یک اعلان جدید.";
 
-        if (notification.type === "like") {
+        if (n.type === "like") {
           text = "پست شما را پسندید.";
         }
 
-        if (notification.type === "comment") {
+        if (n.type === "comment") {
           text = "روی پست شما نظر داد.";
         }
 
-        if (notification.type === "follow") {
+        if (n.type === "follow") {
           text = "شما را دنبال کرد.";
         }
 
-        if (notification.type === "message") {
+        if (n.type === "message") {
           text = "برای شما پیام فرستاد.";
         }
 
@@ -2280,10 +2623,18 @@ async function app(req, res) {
             🔔
 
             <b>
-              ${escapeHtml(notification.actor || "کاربر")}
+              ${escapeHtml(
+                n.actor || "کاربر"
+              )}
             </b>
 
             ${text}
+
+            <div class="muted">
+              ${new Date(
+                n.created_at
+              ).toLocaleString("fa-IR")}
+            </div>
 
           </div>
         `;
@@ -2292,8 +2643,8 @@ async function app(req, res) {
       if (!result.rowCount) {
 
         content = `
-          <div class="card muted">
-            اعلانی ندارید.
+          <div class="card empty">
+            🔔 اعلانی ندارید.
           </div>
         `;
       }
@@ -2307,7 +2658,136 @@ async function app(req, res) {
       );
     }
 
-    if (method === "GET" && path === "/messages") {
+    /* =====================
+       تغییر رمز
+    ===================== */
+
+    if (
+      method === "GET" &&
+      path === "/change-password"
+    ) {
+
+      return sendHtml(
+        res,
+        200,
+        "تغییر رمز",
+        `
+        <div class="card">
+
+          <form
+            method="post"
+            action="/change-password"
+          >
+
+            <input
+              name="old"
+              type="password"
+              placeholder="رمز فعلی"
+              required
+            >
+
+            <input
+              name="new"
+              type="password"
+              minlength="6"
+              placeholder="رمز جدید"
+              required
+            >
+
+            <button class="blue">
+              🔐 تغییر رمز
+            </button>
+
+          </form>
+
+        </div>
+        `,
+        user
+      );
+    }
+
+    if (
+      method === "POST" &&
+      path === "/change-password"
+    ) {
+
+      const b = await readBody(req);
+
+      const oldPassword =
+        b.get("old") || "";
+
+      const newPassword =
+        b.get("new") || "";
+
+      if (newPassword.length < 6) {
+
+        return sendHtml(
+          res,
+          400,
+          "خطا",
+          `
+          <div class="card error">
+            رمز جدید باید حداقل ۶ کاراکتر باشد.
+          </div>
+          `,
+          user
+        );
+      }
+
+      const check = await pool.query(
+        `
+        SELECT id
+        FROM users
+        WHERE id=$1
+          AND password=$2
+        `,
+        [
+          user.id,
+          hashPassword(oldPassword)
+        ]
+      );
+
+      if (!check.rowCount) {
+
+        return sendHtml(
+          res,
+          400,
+          "خطا",
+          `
+          <div class="card error">
+            رمز فعلی اشتباه است.
+          </div>
+          `,
+          user
+        );
+      }
+
+      await pool.query(
+        `
+        UPDATE users
+        SET password=$1
+        WHERE id=$2
+        `,
+        [
+          hashPassword(newPassword),
+          user.id
+        ]
+      );
+
+      return redirect(
+        res,
+        "/profile"
+      );
+    }
+
+    /* =====================
+       پیام‌ها
+    ===================== */
+
+    if (
+      method === "GET" &&
+      path === "/messages"
+    ) {
 
       const otherId = Number(
         url.searchParams.get("user") || 0
@@ -2315,26 +2795,79 @@ async function app(req, res) {
 
       if (!otherId) {
 
+        const people = await pool.query(
+          `
+          SELECT id,name,email
+          FROM users
+          WHERE id<>$1
+          ORDER BY name
+          LIMIT 30
+          `,
+          [user.id]
+        );
+
+        let content = `
+          <div class="card">
+
+            <h3>💬 پیام‌ها</h3>
+
+            <p class="muted">
+              برای شروع یک گفتگو، کاربر را انتخاب کن.
+            </p>
+
+          </div>
+        `;
+
+        for (const person of people.rows) {
+
+          content += `
+            <div class="card">
+
+              <div class="row">
+
+                ${avatar(person.name)}
+
+                <div>
+
+                  <b>
+                    ${escapeHtml(person.name)}
+                  </b>
+
+                  <div class="muted ltr">
+                    ${escapeHtml(person.email)}
+                  </div>
+
+                </div>
+
+              </div>
+
+              <div style="margin-top:12px">
+
+                <a
+                  class="btn blue"
+                  href="/messages?user=${person.id}"
+                >
+                  💬 گفتگو
+                </a>
+
+              </div>
+
+            </div>
+          `;
+        }
+
         return sendHtml(
           res,
           200,
           "پیام‌ها",
-          `
-          <div class="card">
-
-            <a class="btn" href="/search">
-              🔎 ابتدا کاربر را جستجو کن
-            </a>
-
-          </div>
-          `,
+          content,
           user
         );
       }
 
       const target = await pool.query(
         `
-        SELECT id,name
+        SELECT id,name,email
         FROM users
         WHERE id=$1
         `,
@@ -2370,11 +2903,32 @@ async function app(req, res) {
       );
 
       let content = `
+
         <div class="card">
 
-          <h3>
-            گفتگو با ${escapeHtml(target.rows[0].name)}
-          </h3>
+          <div class="row">
+
+            ${avatar(target.rows[0].name)}
+
+            <div>
+
+              <b>
+                ${escapeHtml(
+                  target.rows[0].name
+                )}
+              </b>
+
+              <div class="muted ltr">
+                ${escapeHtml(
+                  target.rows[0].email
+                )}
+              </div>
+
+            </div>
+
+          </div>
+
+          <div class="divider"></div>
 
           <form
             method="post"
@@ -2384,30 +2938,37 @@ async function app(req, res) {
             <textarea
               name="content"
               maxlength="3000"
-              placeholder="پیام..."
+              placeholder="پیام خودت را بنویس..."
               required
             ></textarea>
 
-            <button>
-              ارسال پیام
+            <button class="blue">
+              📤 ارسال پیام
             </button>
 
           </form>
 
         </div>
+
       `;
 
-      for (const message of messages.rows) {
+      for (const m of messages.rows) {
 
         content += `
           <div class="card">
 
             <b>
-              ${escapeHtml(message.name)}
+              ${escapeHtml(m.name)}
             </b>
 
             <div class="text">
-              ${escapeHtml(message.content)}
+              ${escapeHtml(m.content)}
+            </div>
+
+            <div class="muted">
+              ${new Date(
+                m.created_at
+              ).toLocaleString("fa-IR")}
             </div>
 
           </div>
@@ -2417,13 +2978,16 @@ async function app(req, res) {
       return sendHtml(
         res,
         200,
-        "پیام",
+        "گفتگو",
         content,
         user
       );
     }
 
-    if (method === "POST" && path === "/messages") {
+    if (
+      method === "POST" &&
+      path === "/messages"
+    ) {
 
       const otherId = Number(
         url.searchParams.get("user")
@@ -2431,7 +2995,8 @@ async function app(req, res) {
 
       const b = await readBody(req);
 
-      const content = (b.get("content") || "").trim();
+      const content =
+        (b.get("content") || "").trim();
 
       if (
         content &&
@@ -2439,30 +3004,42 @@ async function app(req, res) {
         otherId !== user.id
       ) {
 
-        await pool.query(
+        const target = await pool.query(
           `
-          INSERT INTO messages
-          (sender_id,receiver_id,content)
-          VALUES($1,$2,$3)
+          SELECT id
+          FROM users
+          WHERE id=$1
           `,
-          [
-            user.id,
-            otherId,
-            content
-          ]
+          [otherId]
         );
 
-        await pool.query(
-          `
-          INSERT INTO notifications
-          (user_id,actor_id,type)
-          VALUES($1,$2,'message')
-          `,
-          [
-            otherId,
-            user.id
-          ]
-        );
+        if (target.rowCount) {
+
+          await pool.query(
+            `
+            INSERT INTO messages
+            (sender_id,receiver_id,content)
+            VALUES($1,$2,$3)
+            `,
+            [
+              user.id,
+              otherId,
+              content
+            ]
+          );
+
+          await pool.query(
+            `
+            INSERT INTO notifications
+            (user_id,actor_id,type)
+            VALUES($1,$2,'message')
+            `,
+            [
+              otherId,
+              user.id
+            ]
+          );
+        }
       }
 
       return redirect(
@@ -2471,7 +3048,14 @@ async function app(req, res) {
       );
     }
 
-    if (method === "GET" && path === "/report") {
+    /* =====================
+       گزارش
+    ===================== */
+
+    if (
+      method === "GET" &&
+      path === "/report"
+    ) {
 
       const postId = Number(
         url.searchParams.get("post") || 0
@@ -2488,7 +3072,12 @@ async function app(req, res) {
         `
         <div class="card">
 
-          <form method="post" action="/report">
+          <h3>🚩 گزارش</h3>
+
+          <form
+            method="post"
+            action="/report"
+          >
 
             <input
               type="hidden"
@@ -2505,7 +3094,7 @@ async function app(req, res) {
             <textarea
               name="reason"
               maxlength="1000"
-              placeholder="دلیل گزارش"
+              placeholder="دلیل گزارش را بنویس..."
               required
             ></textarea>
 
@@ -2521,7 +3110,10 @@ async function app(req, res) {
       );
     }
 
-    if (method === "POST" && path === "/report") {
+    if (
+      method === "POST" &&
+      path === "/report"
+    ) {
 
       const b = await readBody(req);
 
@@ -2554,7 +3146,14 @@ async function app(req, res) {
       return redirect(res, "/");
     }
 
-    if (method === "GET" && path === "/jobs") {
+    /* =====================
+       کاریابی
+    ===================== */
+
+    if (
+      method === "GET" &&
+      path === "/jobs"
+    ) {
 
       const jobs = await pool.query(
         `
@@ -2574,7 +3173,14 @@ async function app(req, res) {
       );
 
       let content = `
+
         <div class="card">
+
+          <h2>💼 کاریابی</h2>
+
+          <p class="muted">
+            آگهی‌های کاری و فرصت‌های شغلی
+          </p>
 
           <a
             class="btn green"
@@ -2584,33 +3190,55 @@ async function app(req, res) {
           </a>
 
         </div>
+
       `;
 
       for (const job of jobs.rows) {
 
         content += `
+
           <div class="job">
 
-            <h3>
+            <div class="job-title">
               ${escapeHtml(job.title)}
-            </h3>
+            </div>
 
-            <div>
+            <div class="job-line">
               👤 ${escapeHtml(job.name)}
             </div>
 
-            <div>
-              📍 ${escapeHtml(job.city || "")}
+            <div class="job-line">
+              📍 ${escapeHtml(job.city || "نامشخص")}
             </div>
 
-            <div class="success">
-              💰 ${escapeHtml(job.salary || "توافقی")}
+            <div class="job-line success">
+              💰 ${escapeHtml(
+                job.salary || "توافقی"
+              )}
             </div>
 
-            <div class="text">
-              ${escapeHtml(job.description || "")}
+            <div class="job-description">
+              ${escapeHtml(
+                job.description || ""
+              )}
             </div>
 
+            <div class="muted" style="margin-top:12px">
+              ${new Date(
+                job.created_at
+              ).toLocaleString("fa-IR")}
+            </div>
+
+          </div>
+
+        `;
+      }
+
+      if (!jobs.rowCount) {
+
+        content += `
+          <div class="card empty">
+            هنوز آگهی شغلی ثبت نشده است.
           </div>
         `;
       }
@@ -2624,20 +3252,27 @@ async function app(req, res) {
       );
     }
 
-    if (method === "GET" && path === "/new-job") {
+    if (
+      method === "GET" &&
+      path === "/new-job"
+    ) {
 
       return sendHtml(
         res,
         200,
-        "آگهی شغلی جدید",
+        "ثبت آگهی شغلی",
         `
         <div class="card">
 
-          <form method="post" action="/new-job">
+          <form
+            method="post"
+            action="/new-job"
+          >
 
             <input
               name="title"
               placeholder="عنوان شغل"
+              maxlength="200"
               required
             >
 
@@ -2653,12 +3288,13 @@ async function app(req, res) {
 
             <textarea
               name="description"
-              placeholder="توضیحات آگهی"
+              maxlength="5000"
+              placeholder="توضیحات آگهی..."
               required
             ></textarea>
 
             <button class="green">
-              انتشار آگهی
+              🚀 انتشار آگهی
             </button>
 
           </form>
@@ -2669,7 +3305,10 @@ async function app(req, res) {
       );
     }
 
-    if (method === "POST" && path === "/new-job") {
+    if (
+      method === "POST" &&
+      path === "/new-job"
+    ) {
 
       const b = await readBody(req);
 
@@ -2703,22 +3342,34 @@ async function app(req, res) {
         );
       }
 
-      return redirect(res, "/jobs");
+      return redirect(
+        res,
+        "/jobs"
+      );
     }
+
+    /* =====================
+       صفحه پیدا نشد
+    ===================== */
 
     return sendHtml(
       res,
       404,
       "صفحه پیدا نشد",
       `
-      <div class="card">
+      <div class="card empty">
 
-        صفحه موردنظر پیدا نشد.
+        <h2>صفحه پیدا نشد 😕</h2>
 
-        <br><br>
+        <p>
+          آدرس واردشده وجود ندارد.
+        </p>
 
-        <a class="btn" href="/">
-          بازگشت به خانه
+        <a
+          class="btn"
+          href="/"
+        >
+          🏠 بازگشت به خانه
         </a>
 
       </div>
@@ -2728,7 +3379,10 @@ async function app(req, res) {
 
   } catch (error) {
 
-    console.error("REQUEST ERROR:", error);
+    console.error(
+      "REQUEST ERROR:",
+      error
+    );
 
     if (!res.headersSent) {
 
@@ -2739,13 +3393,20 @@ async function app(req, res) {
         `
         <div class="card">
 
-          <div class="error">
-            خطایی در اجرای درخواست رخ داد.
-          </div>
+          <h2 class="error">
+            خطایی رخ داد.
+          </h2>
 
-          <div class="muted">
-            جزئیات خطا را در Logs رندر بررسی کنید.
-          </div>
+          <p class="muted">
+            Logs رندر را بررسی کنید.
+          </p>
+
+          <a
+            class="btn"
+            href="/"
+          >
+            بازگشت
+          </a>
 
         </div>
         `,
@@ -2757,36 +3418,53 @@ async function app(req, res) {
   }
 }
 
+/* =========================
+   اجرای سرور
+========================= */
+
 async function start() {
 
   try {
 
     await pool.query("SELECT NOW()");
 
-    console.log("Database connection successful.");
+    console.log(
+      "Database connection successful."
+    );
 
     await initDatabase();
 
-    const server = http.createServer(app);
+    const server =
+      http.createServer(app);
 
-    server.on("clientError", (error, socket) => {
+    server.on(
+      "clientError",
+      (error, socket) => {
 
-      console.error("CLIENT ERROR:", error.message);
-
-      try {
-        socket.end(
-          "HTTP/1.1 400 Bad Request\r\n\r\n"
+        console.error(
+          "CLIENT ERROR:",
+          error.message
         );
-      } catch {}
-    });
+
+        try {
+
+          socket.end(
+            "HTTP/1.1 400 Bad Request\r\n\r\n"
+          );
+
+        } catch {}
+      }
+    );
 
     server.listen(
       PORT,
       "0.0.0.0",
       () => {
+
         console.log(
           `Server running on port ${PORT}`
         );
+
       }
     );
 
@@ -2794,7 +3472,7 @@ async function start() {
 
     console.error(
       "STARTUP ERROR:",
-      error.message
+      error
     );
 
     process.exit(1);
