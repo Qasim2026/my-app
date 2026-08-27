@@ -1,12 +1,5178 @@
-{
-  "name": "my-app",
-  "version": "1.0.0",
-  "description": "My social web app",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "pg": "^8.16.3"
+const http = require("http");
+const crypto = require("crypto");
+const { Pool } = require("pg");
+
+const PORT = Number(process.env.PORT || 10000);
+const DATABASE_URL = process.env.DATABASE_URL;
+
+if (!DATABASE_URL) {
+  console.error("DATABASE_URL is not set. Add it in Render > Environment.");
+  process.exit(1);
+}
+
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+  connectionTimeoutMillis: 15000,
+  idleTimeoutMillis: 30000,
+  max: 10
+});
+
+const MAX_BODY = 8 * 1024 * 1024;
+
+function hashPassword(value) {
+  return crypto.createHash("sha256").update(String(value)).digest("hex");
+}
+
+function token(bytes = 32) {
+  return crypto.randomBytes(bytes).toString("hex");
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function validId(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+function parseCookies(req) {
+  const result = {};
+  for (const part of (req.headers.cookie || "").split(";")) {
+    const i = part.indexOf("=");
+    if (i < 0) continue;
+    const key = part.slice(0, i).trim();
+    const value = part.slice(i + 1).trim();
+    try {
+      result[key] = decodeURIComponent(value);
+    } catch {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    let rejected = false;
+
+    req.on("data", chunk => {
+      if (rejected) return;
+      data += chunk.toString();
+
+      if (Buffer.byteLength(data, "utf8") > MAX_BODY) {
+        rejected = true;
+        reject(new Error("Request body too large"));
+        req.destroy();
+      }
+    });
+
+    req.on("end", () => {
+      if (!rejected) resolve(new URLSearchParams(data));
+    });
+
+    req.on("error", reject);
+  });
+}
+
+function sessionCookie(id) {
+  return `sessionId=${encodeURIComponent(id)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=2592000`;
+}
+
+function clearCookie() {
+  return "sessionId=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0";
+}
+
+function redirect(res, location, cookie) {
+  const headers = { Location: location };
+  if (cookie) headers["Set-Cookie"] = cookie;
+  res.writeHead(302, headers);
+  res.end();
+}
+
+async function getSession(req) {
+  const sid = parseCookies(req).sessionId;
+  if (!sid) return null;
+
+  const result = await pool.query(
+    `SELECT
+       u.id,
+       u.name,
+       u.username,
+       u.email,
+       u.bio,
+       u.avatar_url,
+       u.is_private
+     FROM sessions s
+     JOIN users u ON u.id = s.user_id
+     WHERE s.session_id = $1`,
+    [sid]
+  );
+
+  return result.rows[0] || null;
+}
+
+async function notify(userId, actorId, type, postId = null, commentId = null) {
+  if (!userId || userId === actorId) return;
+
+  await pool.query(
+    `INSERT INTO notifications
+      (user_id, actor_id, type, post_id, comment_id)
+     VALUES ($1,$2,$3,$4,$5)`,
+    [userId, actorId, type, postId, commentId]
+  );
+}
+
+function avatar(user) {
+  if (user && user.avatar_url) {
+    return `<img class="avatar-img" src="${escapeHtml(user.avatar_url)}" alt="avatar">`;
+  }
+
+  const first = String(user?.name || "?").trim().slice(0, 1) || "?";
+  return `<div class="avatar">${escapeHtml(first)}</div>`;
+}
+
+function button(action, text, cls = "", method = "post") {
+  return `
+    <form method="${method}" action="${action}" class="inline">
+      <button class="${cls}">${text}</button>
+    </form>
+  `;
+}
+
+function page(title, content, user, badge = 0) {
+  const nav = user
+    ? `
+      <nav class="bottom-nav">
+        <a href="/">🏠<small>خانه</small></a>
+        <a href="/explore">🔎<small>اکسپلور</small></a>
+        <a href="/new-post">➕<small>پست</small></a>
+        <a href="/messages">💬<small>پیام</small></a>
+        <a href="/profile">👤<small>پروفایل</small></a>
+        ${badge ? `<span class="nav-badge">${badge}</span>` : ""}
+      </nav>
+    `
+    : "";
+
+  return `
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#111827">
+<title>${escapeHtml(title)}</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;
+ background:#eef1f5;
+ color:#202124;
+ font-family:Tahoma,Arial,sans-serif;
+}
+.app{
+ width:100%;
+ max-width:760px;
+ min-height:100vh;
+ margin:auto;
+ background:#f8f9fb;
+ padding-bottom:90px;
+}
+.header{
+ position:sticky;
+ top:0;
+ z-index:50;
+ background:rgba(255,255,255,.97);
+ border-bottom:1px solid #ddd;
+ padding:15px;
+ text-align:center;
+ font-weight:bold;
+ font-size:19px;
+}
+.content{padding:14px}
+.card,.job,.story{
+ background:#fff;
+ border:1px solid #e0e4e8;
+ border-radius:18px;
+ padding:15px;
+ margin-bottom:14px;
+ box-shadow:0 3px 12px rgba(0,0,0,.04);
+}
+.row{display:flex;align-items:center;gap:11px}
+.avatar{
+ width:50px;
+ height:50px;
+ min-width:50px;
+ border-radius:50%;
+ background:#202124;
+ color:white;
+ display:flex;
+ align-items:center;
+ justify-content:center;
+ font-size:21px;
+ font-weight:bold;
+}
+.avatar-img{
+ width:50px;
+ height:50px;
+ min-width:50px;
+ border-radius:50%;
+ object-fit:cover;
+}
+.name{font-weight:bold}
+.muted{color:#777;font-size:12px}
+.text{
+ white-space:pre-wrap;
+ word-break:break-word;
+ line-height:1.9;
+ margin:13px 0;
+}
+.stats{
+ display:flex;
+ flex-wrap:wrap;
+ gap:14px;
+ color:#666;
+ font-size:13px;
+}
+.actions{
+ display:flex;
+ flex-wrap:wrap;
+ gap:7px;
+ margin-top:12px;
+}
+.inline{display:inline;margin:0}
+button,.btn{
+ border:0;
+ border-radius:11px;
+ padding:10px 13px;
+ background:#202124;
+ color:#fff;
+ font-size:14px;
+ text-decoration:none;
+ cursor:pointer;
+ display:inline-block;
+}
+button:hover,.btn:hover{opacity:.9}
+.full{width:100%;margin-top:7px}
+input,textarea,select{
+ width:100%;
+ padding:13px;
+ margin:6px 0;
+ border:1px solid #ccd2d8;
+ border-radius:11px;
+ font:inherit;
+ background:#fff;
+}
+textarea{min-height:120px;resize:vertical}
+.pink{background:#e91e63}
+.blue{background:#1976d2}
+.purple{background:#6a4c93}
+.green{background:#16803c}
+.red{background:#b00020}
+.gray{background:#687078}
+.orange{background:#d97706}
+.menu{display:grid;gap:9px}
+.menu .btn,.menu button{width:100%;text-align:center}
+.media{
+ display:block;
+ width:100%;
+ max-height:560px;
+ object-fit:cover;
+ border-radius:14px;
+ margin-top:9px;
+}
+.comment{
+ background:#f3f5f7;
+ border-radius:12px;
+ padding:10px;
+ margin-top:8px;
+}
+.bottom-nav{
+ position:fixed;
+ bottom:0;
+ left:50%;
+ transform:translateX(-50%);
+ width:100%;
+ max-width:760px;
+ height:72px;
+ background:white;
+ border-top:1px solid #ddd;
+ display:flex;
+ justify-content:space-around;
+ align-items:center;
+ z-index:100;
+}
+.bottom-nav a{
+ text-decoration:none;
+ color:#555;
+ text-align:center;
+ font-size:22px;
+}
+.bottom-nav small{
+ display:block;
+ font-size:10px;
+}
+.nav-badge{
+ position:absolute;
+ top:5px;
+ right:25%;
+ background:#e11;
+ color:white;
+ border-radius:20px;
+ font-size:10px;
+ padding:3px 6px;
+}
+.badge{
+ background:#e11;
+ color:white;
+ border-radius:20px;
+ padding:3px 7px;
+ font-size:11px;
+}
+.grid{
+ display:grid;
+ grid-template-columns:repeat(3,1fr);
+ gap:6px;
+}
+.grid img,.grid video{
+ width:100%;
+ aspect-ratio:1;
+ object-fit:cover;
+ border-radius:8px;
+}
+.tabs{
+ display:flex;
+ gap:6px;
+ overflow:auto;
+ margin-bottom:12px;
+}
+.tabs a{
+ white-space:nowrap;
+}
+.story-row{
+ display:flex;
+ gap:10px;
+ overflow-x:auto;
+ padding-bottom:5px;
+}
+.story-circle{
+ min-width:68px;
+ text-align:center;
+ font-size:11px;
+}
+.story-circle .avatar{
+ width:58px;
+ height:58px;
+ min-width:58px;
+ margin:auto;
+ border:3px solid #e91e63;
+}
+.notice{
+ background:#f0f7ff;
+ border:1px solid #d6e9ff;
+ border-radius:13px;
+ padding:12px;
+ line-height:1.8;
+}
+.success{color:#087f23}
+.error{color:#b00020}
+.empty{text-align:center;padding:28px;color:#777}
+.top-grid{
+ display:grid;
+ grid-template-columns:repeat(2,1fr);
+ gap:8px;
+}
+.search-item{
+ display:flex;
+ align-items:center;
+ gap:12px;
+ padding:10px 0;
+ border-bottom:1px solid #eee;
+}
+@media(max-width:450px){
+ .content{padding:10px}
+ .card,.job,.story{padding:12px;border-radius:15px}
+ .top-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="app">
+<div class="header">${escapeHtml(title)}</div>
+<main class="content">${content}</main>
+</div>
+${nav}
+</body>
+</html>`;
+}
+
+async function sendHtml(res, status, title, content, user = null) {
+  let badge = 0;
+
+  if (user) {
+    const r = await pool.query(
+      `SELECT COUNT(*)::int n
+       FROM notifications
+       WHERE user_id=$1 AND read=false`,
+      [user.id]
+    );
+    badge = r.rows[0]?.n || 0;
+  }
+
+  res.writeHead(status, {
+    "Content-Type": "text/html; charset=utf-8"
+  });
+
+  res.end(page(title, content, user, badge));
+}
+
+async function sendJson(res, status, data) {
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8"
+  });
+  res.end(JSON.stringify(data));
+}
+
+async function columnExists(table, column) {
+  const r = await pool.query(
+    `SELECT 1
+     FROM information_schema.columns
+     WHERE table_name=$1 AND column_name=$2`,
+    [table, column]
+  );
+  return r.rowCount > 0;
+}
+
+async function addColumn(table, column, definition) {
+  if (!(await columnExists(table, column))) {
+    await pool.query(
+      `ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`
+    );
   }
 }
+
+async function initDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users(
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      username TEXT,
+      email TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      bio TEXT DEFAULT '',
+      avatar_url TEXT,
+      is_private BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await addColumn("users","username","TEXT");
+  await addColumn("users","bio","TEXT DEFAULT ''");
+  await addColumn("users","avatar_url","TEXT");
+  await addColumn("users","is_private","BOOLEAN NOT NULL DEFAULT FALSE");
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sessions(
+      session_id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS posts(
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content TEXT NOT NULL DEFAULT '',
+      media_url TEXT,
+      media_type TEXT DEFAULT 'image',
+      caption TEXT DEFAULT '',
+      location TEXT,
+      is_archived BOOLEAN DEFAULT FALSE,
+      is_pinned BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await addColumn("posts","media_type","TEXT DEFAULT 'image'");
+  await addColumn("posts","caption","TEXT DEFAULT ''");
+  await addColumn("posts","location","TEXT");
+  await addColumn("posts","is_archived","BOOLEAN DEFAULT FALSE");
+  await addColumn("posts","is_pinned","BOOLEAN DEFAULT FALSE");
+  await addColumn("posts","updated_at","TIMESTAMPTZ DEFAULT NOW()");
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS likes(
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY(user_id,post_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS comments(
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      parent_id INTEGER REFERENCES comments(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS comment_likes(
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      comment_id INTEGER NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+      PRIMARY KEY(user_id,comment_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS follows(
+      follower_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      following_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY(follower_id,following_id),
+      CHECK(follower_id<>following_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS follow_requests(
+      id SERIAL PRIMARY KEY,
+      requester_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      target_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(requester_id,target_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS saved_posts(
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY(user_id,post_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS collections(
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS collection_items(
+      collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      PRIMARY KEY(collection_id,post_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS blocks(
+      blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY(blocker_id,blocked_id),
+      CHECK(blocker_id<>blocked_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS restrictions(
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      target_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY(user_id,target_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS mutes(
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      target_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY(user_id,target_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS conversations(
+      id SERIAL PRIMARY KEY,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS conversation_members(
+      conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      PRIMARY KEY(conversation_id,user_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS messages(
+      id SERIAL PRIMARY KEY,
+      sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE,
+      content TEXT NOT NULL DEFAULT '',
+      media_url TEXT,
+      media_type TEXT,
+      reply_to INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+      read_at TIMESTAMPTZ,
+      deleted BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await addColumn("messages","conversation_id","INTEGER REFERENCES conversations(id) ON DELETE CASCADE");
+  await addColumn("messages","media_url","TEXT");
+  await addColumn("messages","media_type","TEXT");
+  await addColumn("messages","reply_to","INTEGER REFERENCES messages(id) ON DELETE SET NULL");
+  await addColumn("messages","read_at","TIMESTAMPTZ");
+  await addColumn("messages","deleted","BOOLEAN DEFAULT FALSE");
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS message_reactions(
+      message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reaction TEXT NOT NULL,
+      PRIMARY KEY(message_id,user_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notifications(
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      actor_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
+      comment_id INTEGER REFERENCES comments(id) ON DELETE CASCADE,
+      read BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await addColumn("notifications","comment_id","INTEGER REFERENCES comments(id) ON DELETE CASCADE");
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS reports(
+      id SERIAL PRIMARY KEY,
+      reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
+      comment_id INTEGER REFERENCES comments(id) ON DELETE CASCADE,
+      reported_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      job_id INTEGER,
+      reason TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS stories(
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      media_url TEXT,
+      media_type TEXT DEFAULT 'image',
+      text TEXT DEFAULT '',
+      expires_at TIMESTAMPTZ DEFAULT NOW()+INTERVAL '24 hours',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS story_views(
+      story_id INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      viewed_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY(story_id,user_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS story_reactions(
+      story_id INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reaction TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY(story_id,user_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS highlights(
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS highlight_items(
+      highlight_id INTEGER NOT NULL REFERENCES highlights(id) ON DELETE CASCADE,
+      story_id INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+      PRIMARY KEY(highlight_id,story_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS reels(
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      caption TEXT DEFAULT '',
+      video_url TEXT NOT NULL,
+      thumbnail_url TEXT,
+      location TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS reel_likes(
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reel_id INTEGER NOT NULL REFERENCES reels(id) ON DELETE CASCADE,
+      PRIMARY KEY(user_id,reel_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS reel_comments(
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reel_id INTEGER NOT NULL REFERENCES reels(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS post_views(
+      id BIGSERIAL PRIMARY KEY,
+      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      viewed_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS reel_views(
+      id BIGSERIAL PRIMARY KEY,
+      reel_id INTEGER NOT NULL REFERENCES reels(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      viewed_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hashtags(
+      id SERIAL PRIMARY KEY,
+      name TEXT UNIQUE NOT NULL
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS post_hashtags(
+      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      hashtag_id INTEGER NOT NULL REFERENCES hashtags(id) ON DELETE CASCADE,
+      PRIMARY KEY(post_id,hashtag_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS mentions(
+      id SERIAL PRIMARY KEY,
+      post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
+      reel_id INTEGER REFERENCES reels(id) ON DELETE CASCADE,
+      story_id INTEGER REFERENCES stories(id) ON DELETE CASCADE,
+      mentioned_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS media(
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      url TEXT NOT NULL,
+      media_type TEXT NOT NULL,
+      size_bytes BIGINT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS audio(
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL,
+      duration INTEGER,
+      licensed BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS post_audio(
+      post_id INTEGER PRIMARY KEY REFERENCES posts(id) ON DELETE CASCADE,
+      audio_id INTEGER NOT NULL REFERENCES audio(id) ON DELETE CASCADE
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS search_history(
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      query TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS jobs(
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      category TEXT DEFAULT '',
+      city TEXT DEFAULT '',
+      workplace TEXT DEFAULT '',
+      salary TEXT DEFAULT '',
+      description TEXT NOT NULL,
+      contact TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS saved_jobs(
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+      PRIMARY KEY(user_id,job_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS job_applications(
+      id SERIAL PRIMARY KEY,
+      job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+      applicant_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      message TEXT DEFAULT '',
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(job_id,applicant_id)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS active_calls(
+      id SERIAL PRIMARY KEY,
+      caller_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      call_type TEXT NOT NULL,
+      status TEXT DEFAULT 'ringing',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      ended_at TIMESTAMPTZ
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_settings(
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      notifications BOOLEAN DEFAULT TRUE,
+      message_notifications BOOLEAN DEFAULT TRUE,
+      allow_messages BOOLEAN DEFAULT TRUE,
+      allow_mentions BOOLEAN DEFAULT TRUE,
+      allow_tags BOOLEAN DEFAULT TRUE,
+      theme TEXT DEFAULT 'light'
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_posts_created
+    ON posts(created_at DESC)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_messages_pair
+    ON messages(sender_id,receiver_id,created_at)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_notifications_user
+    ON notifications(user_id,read,created_at DESC)
+  `);
+
+  await pool.query(`
+    UPDATE users
+    SET username = LOWER(REGEXP_REPLACE(
+      COALESCE(username,name,'user') || '_' || id,
+      '[^a-zA-Z0-9_]',
+      '',
+      'g'
+    ))
+    WHERE username IS NULL OR username=''
+  `);
+
+  console.log("Database initialization completed.");
+}
+
+function authPage(register = false) {
+  return `
+  <div class="card">
+    <h2>${register ? "ساخت حساب" : "ورود"}</h2>
+
+    <form method="post" action="${register ? "/register" : "/login"}">
+      ${
+        register
+          ? `<input name="name" maxlength="80" placeholder="نام" required>`
+          : ""
+      }
+
+      ${
+        register
+          ? `<input name="username" maxlength="30" placeholder="نام کاربری" required>`
+          : ""
+      }
+
+      <input name="email" type="email" maxlength="160" placeholder="ایمیل" required>
+
+      <input
+        name="password"
+        type="password"
+        minlength="6"
+        maxlength="200"
+        placeholder="رمز عبور"
+        required
+      >
+
+      <button class="green full">
+        ${register ? "ثبت‌نام" : "ورود"}
+      </button>
+    </form>
+
+    <p>
+      ${
+        register
+          ? `حساب داری؟ <a href="/login">ورود</a>`
+          : `حساب نداری؟ <a href="/register">ثبت‌نام</a>`
+      }
+    </p>
+  </div>
+  `;
+}
+
+function mediaHtml(url, type = "image") {
+  if (!url) return "";
+
+  const safe = escapeHtml(url);
+
+  if (type === "video") {
+    return `
+      <video class="media" controls preload="metadata">
+        <source src="${safe}">
+      </video>
+    `;
+  }
+
+  return `<img class="media" src="${safe}" alt="رسانه">`;
+}
+
+function extractHashtags(text) {
+  return [...new Set(
+    String(text || "")
+      .match(/#[\p{L}\p{N}_]+/gu) || []
+  )].map(x => x.slice(1).toLowerCase());
+}
+
+async function saveHashtags(postId, text) {
+  const tags = extractHashtags(text);
+
+  for (const tag of tags) {
+    const r = await pool.query(
+      `INSERT INTO hashtags(name)
+       VALUES($1)
+       ON CONFLICT(name) DO UPDATE SET name=EXCLUDED.name
+       RETURNING id`,
+      [tag]
+    );
+
+    await pool.query(
+      `INSERT INTO post_hashtags(post_id,hashtag_id)
+       VALUES($1,$2)
+       ON CONFLICT DO NOTHING`,
+      [postId, r.rows[0].id]
+    );
+  }
+}
+
+async function getStats(postId, userId) {
+  const r = await pool.query(
+    `SELECT
+      (SELECT COUNT(*) FROM likes WHERE post_id=$1)::int likes,
+      (SELECT COUNT(*) FROM comments WHERE post_id=$1)::int comments,
+      (SELECT COUNT(*) FROM post_views WHERE post_id=$1)::int views,
+      EXISTS(
+        SELECT 1 FROM likes
+        WHERE post_id=$1 AND user_id=$2
+      ) liked,
+      EXISTS(
+        SELECT 1 FROM saved_posts
+        WHERE post_id=$1 AND user_id=$2
+      ) saved`,
+    [postId, userId]
+  );
+
+  return r.rows[0];
+}
+
+async function createConversation(a, b) {
+  const existing = await pool.query(
+    `SELECT c.id
+     FROM conversations c
+     JOIN conversation_members m1
+       ON m1.conversation_id=c.id
+     JOIN conversation_members m2
+       ON m2.conversation_id=c.id
+     WHERE m1.user_id=$1
+       AND m2.user_id=$2
+     GROUP BY c.id
+     HAVING COUNT(*)=2
+     LIMIT 1`,
+    [a, b]
+  );
+
+  if (existing.rowCount) return existing.rows[0].id;
+
+  const c = await pool.query(
+    `INSERT INTO conversations DEFAULT VALUES RETURNING id`
+  );
+
+  await pool.query(
+    `INSERT INTO conversation_members(conversation_id,user_id)
+     VALUES($1,$2),($1,$3)`,
+    [c.rows[0].id, a, b]
+  );
+
+  return c.rows[0].id;
+}
+
+async function app(req, res) {
+  const parsed = new URL(
+    req.url,
+    `http://${req.headers.host || "localhost"}`
+  );
+
+  const path = parsed.pathname;
+  const method = req.method;
+
+  let user = null;
+
+  try {
+    user = await getSession(req);
+
+    if (method === "GET" && path === "/health") {
+      return sendJson(res, 200, {
+        ok: true,
+        service: "social-platform",
+        time: new Date().toISOString()
+      });
+    }
+
+    if (method === "GET" && path === "/login") {
+      return sendHtml(res, 200, "ورود", authPage(false));
+    }
+
+    if (method === "GET" && path === "/register") {
+      return sendHtml(res, 200, "ثبت‌نام", authPage(true));
+    }
+
+    if (method === "POST" && path === "/register") {
+      const b = await readBody(req);
+
+      const name = (b.get("name") || "").trim();
+      const username = (b.get("username") || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, "");
+
+      const email = (b.get("email") || "")
+        .trim()
+        .toLowerCase();
+
+      const password = b.get("password") || "";
+
+      if (
+        name.length < 2 ||
+        username.length < 3 ||
+        !email ||
+        password.length < 6
+      ) {
+        return sendHtml(
+          res,
+          400,
+          "خطا",
+          `<div class="card error">اطلاعات ثبت‌نام معتبر نیست.</div>`
+        );
+      }
+
+      const exists = await pool.query(
+        `SELECT id FROM users
+         WHERE email=$1 OR username=$2`,
+        [email, username]
+      );
+
+      if (exists.rowCount) {
+        return sendHtml(
+          res,
+          400,
+          "خطا",
+          `<div class="card error">
+             ایمیل یا نام کاربری قبلاً استفاده شده است.
+           </div>`
+        );
+      }
+
+      const result = await pool.query(
+        `INSERT INTO users(name,username,email,password)
+         VALUES($1,$2,$3,$4)
+         RETURNING id`,
+        [name, username, email, hashPassword(password)]
+      );
+
+      await pool.query(
+        `INSERT INTO user_settings(user_id)
+         VALUES($1)
+         ON CONFLICT DO NOTHING`,
+        [result.rows[0].id]
+      );
+
+      const sid = token();
+
+      await pool.query(
+        `INSERT INTO sessions(session_id,user_id)
+         VALUES($1,$2)`,
+        [sid, result.rows[0].id]
+      );
+
+      return redirect(res, "/", sessionCookie(sid));
+    }
+
+    if (method === "POST" && path === "/login") {
+      const b = await readBody(req);
+
+      const email = (b.get("email") || "")
+        .trim()
+        .toLowerCase();
+
+      const password = b.get("password") || "";
+
+      const result = await pool.query(
+        `SELECT id
+         FROM users
+         WHERE email=$1 AND password=$2`,
+        [email, hashPassword(password)]
+      );
+
+      if (!result.rowCount) {
+        return sendHtml(
+          res,
+          401,
+          "خطا",
+          `<div class="card error">
+             ایمیل یا رمز عبور اشتباه است.
+           </div>`
+        );
+      }
+
+      const sid = token();
+
+      await pool.query(
+        `INSERT INTO sessions(session_id,user_id)
+         VALUES($1,$2)`,
+        [sid, result.rows[0].id]
+      );
+
+      return redirect(res, "/", sessionCookie(sid));
+    }
+
+    if (!user) {
+      return redirect(res, "/login");
+    }
+
+    if (method === "POST" && path === "/logout") {
+      const sid = parseCookies(req).sessionId;
+
+      if (sid) {
+        await pool.query(
+          `DELETE FROM sessions WHERE session_id=$1`,
+          [sid]
+        );
+      }
+
+      return redirect(res, "/login", clearCookie());
+    }
+
+    if (method === "POST" && path === "/logout-all") {
+      await pool.query(
+        `DELETE FROM sessions WHERE user_id=$1`,
+        [user.id]
+      );
+
+      return redirect(res, "/login", clearCookie());
+    }
+
+    /*
+     * HOME
+     */
+
+    if (method === "GET" && path === "/") {
+      await pool.query(
+        `DELETE FROM stories
+         WHERE expires_at < NOW()`
+      );
+
+      const stories = await pool.query(
+        `SELECT DISTINCT ON(s.user_id)
+           s.*,
+           u.name,
+           u.username,
+           u.avatar_url
+         FROM stories s
+         JOIN users u ON u.id=s.user_id
+         WHERE s.expires_at > NOW()
+           AND (
+             s.user_id=$1
+             OR EXISTS(
+               SELECT 1 FROM follows f
+               WHERE f.follower_id=$1
+                 AND f.following_id=s.user_id
+             )
+           )
+         ORDER BY s.user_id,s.created_at DESC`,
+        [user.id]
+      );
+
+      let content = `
+        <div class="card">
+          <div class="row">
+            ${avatar(user)}
+            <div>
+              <div class="name">${escapeHtml(user.name)}</div>
+              <div class="muted">@${escapeHtml(user.username || "")}</div>
+            </div>
+          </div>
+
+          <div class="top-grid" style="margin-top:12px">
+            <a class="btn green" href="/new-post">➕ پست جدید</a>
+            <a class="btn purple" href="/new-story">📖 استوری</a>
+            <a class="btn blue" href="/new-reel">🎞️ Reel</a>
+            <a class="btn orange" href="/jobs">💼 کاریابی</a>
+          </div>
+        </div>
+      `;
+
+      if (stories.rowCount) {
+        content += `<div class="card"><div class="story-row">`;
+
+        for (const s of stories.rows) {
+          content += `
+            <a class="story-circle" href="/story?id=${s.id}">
+              ${
+                s.avatar_url
+                  ? `<img class="avatar-img" src="${escapeHtml(s.avatar_url)}">`
+                  : `<div class="avatar">${escapeHtml((s.name || "?")[0])}</div>`
+              }
+              <div>${escapeHtml(s.name)}</div>
+            </a>
+          `;
+        }
+
+        content += `</div></div>`;
+      }
+
+      const posts = await pool.query(
+        `SELECT
+           p.*,
+           u.name,
+           u.username,
+           u.avatar_url,
+           (SELECT COUNT(*) FROM likes l
+            WHERE l.post_id=p.id)::int likes,
+           (SELECT COUNT(*) FROM comments c
+            WHERE c.post_id=p.id)::int comments,
+           (SELECT COUNT(*) FROM post_views v
+            WHERE v.post_id=p.id)::int views,
+           EXISTS(
+             SELECT 1 FROM likes l
+             WHERE l.post_id=p.id AND l.user_id=$1
+           ) liked,
+           EXISTS(
+             SELECT 1 FROM saved_posts s
+             WHERE s.post_id=p.id AND s.user_id=$1
+           ) saved
+         FROM posts p
+         JOIN users u ON u.id=p.user_id
+         WHERE p.is_archived=false
+           AND NOT EXISTS(
+             SELECT 1 FROM blocks b
+             WHERE b.blocker_id=$1
+               AND b.blocked_id=p.user_id
+           )
+           AND NOT EXISTS(
+             SELECT 1 FROM mutes m
+             WHERE m.user_id=$1
+               AND m.target_id=p.user_id
+           )
+         ORDER BY
+           p.is_pinned DESC,
+           p.created_at DESC
+         LIMIT 50`,
+        [user.id]
+      );
+
+      for (const p of posts.rows) {
+        content += `
+          <article class="card">
+            <div class="row">
+              ${avatar(p)}
+              <div>
+                <div class="name">
+                  <a href="/user?id=${p.user_id}">
+                    ${escapeHtml(p.name)}
+                  </a>
+                </div>
+                <div class="muted">
+                  @${escapeHtml(p.username || "")}
+                  ·
+                  ${new Date(p.created_at).toLocaleString("fa-IR")}
+                </div>
+              </div>
+            </div>
+
+            ${
+              p.location
+                ? `<div class="muted">📍 ${escapeHtml(p.location)}</div>`
+                : ""
+            }
+
+            <div class="text">${escapeHtml(p.content)}</div>
+
+            ${mediaHtml(p.media_url, p.media_type)}
+
+            <div class="stats">
+              <span>❤️ ${p.likes}</span>
+              <span>💬 ${p.comments}</span>
+              <span>👁️ ${p.views}</span>
+            </div>
+
+            <div class="actions">
+              ${button(
+                `/like?id=${p.id}`,
+                p.liked ? "💔 لغو لایک" : "❤️ لایک",
+                "pink"
+              )}
+
+              ${button(
+                `/save?id=${p.id}`,
+                p.saved ? "🔖 حذف ذخیره" : "🔖 ذخیره",
+                "purple"
+              )}
+
+              <a class="btn gray" href="/post?id=${p.id}">
+                💬 کامنت
+              </a>
+
+              <a class="btn blue" href="/share?post=${p.id}">
+                🔗 اشتراک
+              </a>
+
+              <a class="btn red" href="/report?post=${p.id}">
+                🚩 گزارش
+              </a>
+
+              ${
+                p.user_id === user.id
+                  ? `
+                    <a class="btn" href="/edit-post?id=${p.id}">
+                      ✏️ ویرایش
+                    </a>
+                    ${button(
+                      `/delete-post?id=${p.id}`,
+                      "🗑️ حذف",
+                      "red"
+                    )}
+                  `
+                  : ""
+              }
+            </div>
+          </article>
+        `;
+      }
+
+      if (!posts.rowCount) {
+        content += `
+          <div class="card empty">
+            هنوز پستی برای نمایش وجود ندارد.
+          </div>
+        `;
+      }
+
+      return sendHtml(res, 200, "خانه", content, user);
+    }
+
+    /*
+     * NEW POST
+     */
+
+    if (method === "GET" && path === "/new-post") {
+      return sendHtml(
+        res,
+        200,
+        "پست جدید",
+        `
+        <div class="card">
+          <form method="post" action="/new-post">
+
+            <textarea
+              name="content"
+              maxlength="10000"
+              placeholder="چه خبر؟ #هشتگ @کاربر"
+              required
+            ></textarea>
+
+            <input
+              name="media_url"
+              type="url"
+              maxlength="2000"
+              placeholder="لینک عکس یا ویدئو، اختیاری"
+            >
+
+            <select name="media_type">
+              <option value="image">تصویر</option>
+              <option value="video">ویدئو</option>
+            </select>
+
+            <input
+              name="location"
+              maxlength="200"
+              placeholder="موقعیت مکانی، اختیاری"
+            >
+
+            <button class="green full">
+              انتشار پست
+            </button>
+          </form>
+        </div>
+        `,
+        user
+      );
+    }
+
+    if (method === "POST" && path === "/new-post") {
+      const b = await readBody(req);
+
+      const content = (b.get("content") || "").trim();
+      const media = (b.get("media_url") || "").trim() || null;
+      const mediaType = b.get("media_type") === "video"
+        ? "video"
+        : "image";
+      const location = (b.get("location") || "").trim() || null;
+
+      if (!content && !media) {
+        return sendHtml(
+          res,
+          400,
+          "خطا",
+          `<div class="card error">
+             پست نمی‌تواند کاملاً خالی باشد.
+           </div>`,
+          user
+        );
+      }
+
+      const r = await pool.query(
+        `INSERT INTO posts(
+           user_id,
+           content,
+           media_url,
+           media_type,
+           caption,
+           location
+         )
+         VALUES($1,$2,$3,$4,$2,$5)
+         RETURNING id`,
+        [user.id, content, media, mediaType, location]
+      );
+
+      await saveHashtags(r.rows[0].id, content);
+
+      return redirect(res, "/");
+    }
+
+    /*
+     * LIKE
+     */
+
+    if (method === "POST" && path === "/like") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      if (!id) return redirect(res, "/");
+
+      const post = await pool.query(
+        `SELECT user_id FROM posts WHERE id=$1`,
+        [id]
+      );
+
+      if (!post.rowCount) return redirect(res, "/");
+
+      const existing = await pool.query(
+        `SELECT 1 FROM likes
+         WHERE user_id=$1 AND post_id=$2`,
+        [user.id, id]
+      );
+
+      if (existing.rowCount) {
+        await pool.query(
+          `DELETE FROM likes
+           WHERE user_id=$1 AND post_id=$2`,
+          [user.id, id]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO likes(user_id,post_id)
+           VALUES($1,$2)
+           ON CONFLICT DO NOTHING`,
+          [user.id, id]
+        );
+
+        await notify(
+          post.rows[0].user_id,
+          user.id,
+          "like",
+          id
+        );
+      }
+
+      return redirect(
+        res,
+        req.headers.referer || `/?post=${id}`
+      );
+    }
+
+    /*
+     * SAVE
+     */
+
+    if (method === "POST" && path === "/save") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      if (!id) return redirect(res, "/");
+
+      const existing = await pool.query(
+        `SELECT 1 FROM saved_posts
+         WHERE user_id=$1 AND post_id=$2`,
+        [user.id, id]
+      );
+
+      if (existing.rowCount) {
+        await pool.query(
+          `DELETE FROM saved_posts
+           WHERE user_id=$1 AND post_id=$2`,
+          [user.id, id]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO saved_posts(user_id,post_id)
+           VALUES($1,$2)
+           ON CONFLICT DO NOTHING`,
+          [user.id, id]
+        );
+      }
+
+      return redirect(
+        res,
+        req.headers.referer || "/"
+      );
+    }
+
+    /*
+     * POST PAGE
+     */
+
+    if (method === "GET" && path === "/post") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      if (!id) {
+        return sendHtml(
+          res,
+          400,
+          "پست",
+          `<div class="card error">شناسه پست نامعتبر است.</div>`,
+          user
+        );
+      }
+
+      const result = await pool.query(
+        `SELECT
+           p.*,
+           u.id user_id,
+           u.name,
+           u.username,
+           u.avatar_url
+         FROM posts p
+         JOIN users u ON u.id=p.user_id
+         WHERE p.id=$1`,
+        [id]
+      );
+
+      if (!result.rowCount) {
+        return sendHtml(
+          res,
+          404,
+          "پست",
+          `<div class="card empty">پست پیدا نشد.</div>`,
+          user
+        );
+      }
+
+      await pool.query(
+        `INSERT INTO post_views(post_id,user_id)
+         VALUES($1,$2)`,
+        [id, user.id]
+      );
+
+      const p = result.rows[0];
+      const stats = await getStats(id, user.id);
+
+      const comments = await pool.query(
+        `SELECT
+           c.*,
+           u.name,
+           u.username,
+           u.avatar_url,
+           (SELECT COUNT(*) FROM comment_likes cl
+            WHERE cl.comment_id=c.id)::int likes,
+           EXISTS(
+             SELECT 1 FROM comment_likes cl
+             WHERE cl.comment_id=c.id
+               AND cl.user_id=$1
+           ) liked
+         FROM comments c
+         JOIN users u ON u.id=c.user_id
+         WHERE c.post_id=$2
+         ORDER BY c.created_at ASC`,
+        [user.id, id]
+      );
+
+      let content = `
+        <article class="card">
+
+          <div class="row">
+            ${avatar(p)}
+            <div>
+              <b>${escapeHtml(p.name)}</b>
+              <div class="muted">
+                @${escapeHtml(p.username || "")}
+              </div>
+            </div>
+          </div>
+
+          ${
+            p.location
+              ? `<div class="muted">📍 ${escapeHtml(p.location)}</div>`
+              : ""
+          }
+
+          <div class="text">
+            ${escapeHtml(p.content)}
+          </div>
+
+          ${mediaHtml(p.media_url, p.media_type)}
+
+          <div class="stats">
+            <span>❤️ ${stats.likes}</span>
+            <span>💬 ${stats.comments}</span>
+            <span>👁️ ${stats.views}</span>
+          </div>
+
+          <div class="actions">
+            ${button(
+              `/like?id=${id}`,
+              stats.liked ? "💔 لغو لایک" : "❤️ لایک",
+              "pink"
+            )}
+
+            ${button(
+              `/save?id=${id}`,
+              stats.saved ? "🔖 حذف ذخیره" : "🔖 ذخیره",
+              "purple"
+            )}
+
+            <a class="btn red" href="/report?post=${id}">
+              🚩 گزارش
+            </a>
+          </div>
+        </article>
+
+        <div class="card">
+          <form method="post" action="/comment?id=${id}">
+            <textarea
+              name="content"
+              maxlength="3000"
+              placeholder="نظر خود را بنویس..."
+              required
+            ></textarea>
+            <button class="blue">
+              ارسال نظر
+            </button>
+          </form>
+        </div>
+      `;
+
+      for (const c of comments.rows) {
+        content += `
+          <div class="comment">
+
+            <div class="row">
+              ${avatar(c)}
+              <div>
+                <b>${escapeHtml(c.name)}</b>
+                <div class="muted">
+                  ${new Date(c.created_at).toLocaleString("fa-IR")}
+                </div>
+              </div>
+            </div>
+
+            <div class="text">
+              ${escapeHtml(c.content)}
+            </div>
+
+            <div class="stats">
+              <span>👍 ${c.likes}</span>
+            </div>
+
+            <div class="actions">
+              ${button(
+                `/comment-like?id=${c.id}&post=${id}`,
+                c.liked ? "👎 لغو پسند" : "👍 پسند",
+                "gray"
+              )}
+
+              ${
+                c.user_id === user.id || p.user_id === user.id
+                  ? button(
+                      `/delete-comment?id=${c.id}&post=${id}`,
+                      "🗑️ حذف",
+                      "red"
+                    )
+                  : ""
+              }
+
+              <a
+                class="btn gray"
+                href="/report?comment=${c.id}&post=${id}"
+              >
+                🚩
+              </a>
+            </div>
+
+          </div>
+        `;
+      }
+
+      return sendHtml(res, 200, "پست", content, user);
+    }
+
+    /*
+     * COMMENTS
+     */
+
+    if (method === "POST" && path === "/comment") {
+      const postId = validId(parsed.searchParams.get("id"));
+      const b = await readBody(req);
+      const content = (b.get("content") || "").trim();
+
+      if (!postId || !content) {
+        return redirect(res, "/");
+      }
+
+      const post = await pool.query(
+        `SELECT user_id FROM posts WHERE id=$1`,
+        [postId]
+      );
+
+      if (!post.rowCount) return redirect(res, "/");
+
+      const result = await pool.query(
+        `INSERT INTO comments(user_id,post_id,content)
+         VALUES($1,$2,$3)
+         RETURNING id`,
+        [user.id, postId, content]
+      );
+
+      await notify(
+        post.rows[0].user_id,
+        user.id,
+        "comment",
+        postId,
+        result.rows[0].id
+      );
+
+      return redirect(res, `/post?id=${postId}`);
+    }
+
+    if (method === "POST" && path === "/delete-comment") {
+      const id = validId(parsed.searchParams.get("id"));
+      const postId = validId(parsed.searchParams.get("post"));
+
+      if (!id || !postId) {
+        return redirect(res, "/");
+      }
+
+      await pool.query(
+        `DELETE FROM comments c
+         USING posts p
+         WHERE c.id=$1
+           AND c.post_id=p.id
+           AND (c.user_id=$2 OR p.user_id=$2)`,
+        [id, user.id]
+      );
+
+      return redirect(res, `/post?id=${postId}`);
+    }
+
+    if (method === "POST" && path === "/comment-like") {
+      const id = validId(parsed.searchParams.get("id"));
+      const postId = validId(parsed.searchParams.get("post"));
+
+      if (!id || !postId) return redirect(res, "/");
+
+      const existing = await pool.query(
+        `SELECT 1 FROM comment_likes
+         WHERE user_id=$1 AND comment_id=$2`,
+        [user.id, id]
+      );
+
+      if (existing.rowCount) {
+        await pool.query(
+          `DELETE FROM comment_likes
+           WHERE user_id=$1 AND comment_id=$2`,
+          [user.id, id]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO comment_likes(user_id,comment_id)
+           VALUES($1,$2)
+           ON CONFLICT DO NOTHING`,
+          [user.id, id]
+        );
+      }
+
+      return redirect(res, `/post?id=${postId}`);
+    }
+
+    /*
+     * EDIT POST
+     */
+
+    if (method === "GET" && path === "/edit-post") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      const r = await pool.query(
+        `SELECT * FROM posts
+         WHERE id=$1 AND user_id=$2`,
+        [id, user.id]
+      );
+
+      if (!r.rowCount) return redirect(res, "/");
+
+      const p = r.rows[0];
+
+      return sendHtml(
+        res,
+        200,
+        "ویرایش پست",
+        `
+        <div class="card">
+          <form method="post" action="/edit-post?id=${id}">
+            <textarea name="content" required>${escapeHtml(p.content)}</textarea>
+
+            <input
+              name="media_url"
+              type="url"
+              value="${escapeHtml(p.media_url || "")}"
+              placeholder="لینک رسانه"
+            >
+
+            <select name="media_type">
+              <option value="image" ${p.media_type === "image" ? "selected" : ""}>
+                تصویر
+              </option>
+              <option value="video" ${p.media_type === "video" ? "selected" : ""}>
+                ویدئو
+              </option>
+            </select>
+
+            <input
+              name="location"
+              value="${escapeHtml(p.location || "")}"
+              placeholder="موقعیت"
+            >
+
+            <button class="green full">
+              ذخیره تغییرات
+            </button>
+          </form>
+        </div>
+        `,
+        user
+      );
+    }
+
+    if (method === "POST" && path === "/edit-post") {
+      const id = validId(parsed.searchParams.get("id"));
+      const b = await readBody(req);
+
+      const content = (b.get("content") || "").trim();
+      const media = (b.get("media_url") || "").trim() || null;
+      const type = b.get("media_type") === "video"
+        ? "video"
+        : "image";
+      const location = (b.get("location") || "").trim() || null;
+
+      if (id && content) {
+        await pool.query(
+          `UPDATE posts
+           SET content=$1,
+               caption=$1,
+               media_url=$2,
+               media_type=$3,
+               location=$4,
+               updated_at=NOW()
+           WHERE id=$5 AND user_id=$6`,
+          [content, media, type, location, id, user.id]
+        );
+
+        await pool.query(
+          `DELETE FROM post_hashtags
+           WHERE post_id=$1`,
+          [id]
+        );
+
+        await saveHashtags(id, content);
+      }
+
+      return redirect(res, "/");
+    }
+
+    if (method === "POST" && path === "/delete-post") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      if (id) {
+        await pool.query(
+          `DELETE FROM posts
+           WHERE id=$1 AND user_id=$2`,
+          [id, user.id]
+        );
+      }
+
+      return redirect(res, "/");
+    }
+
+    if (method === "POST" && path === "/archive-post") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      await pool.query(
+        `UPDATE posts
+         SET is_archived=NOT is_archived
+         WHERE id=$1 AND user_id=$2`,
+        [id, user.id]
+      );
+
+      return redirect(res, "/profile");
+    }
+
+    if (method === "POST" && path === "/pin-post") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      await pool.query(
+        `UPDATE posts
+         SET is_pinned=NOT is_pinned
+         WHERE id=$1 AND user_id=$2`,
+        [id, user.id]
+      );
+
+      return redirect(res, "/profile");
+    }
+
+    /*
+     * SEARCH / EXPLORE
+     */
+
+    if (method === "GET" && path === "/search") {
+      const q = (parsed.searchParams.get("q") || "").trim();
+
+      let content = `
+        <div class="card">
+          <form method="get" action="/search">
+            <input
+              name="q"
+              value="${escapeHtml(q)}"
+              placeholder="کاربر، پست یا هشتگ"
+            >
+            <button class="blue full">جستجو</button>
+          </form>
+        </div>
+      `;
+
+      if (q) {
+        await pool.query(
+          `INSERT INTO search_history(user_id,query)
+           VALUES($1,$2)`,
+          [user.id, q]
+        );
+
+        const users = await pool.query(
+          `SELECT id,name,username,avatar_url
+           FROM users
+           WHERE name ILIKE $1
+              OR username ILIKE $1
+              OR email ILIKE $1
+           ORDER BY name
+           LIMIT 30`,
+          [`%${q}%`]
+        );
+
+        if (users.rowCount) {
+          content += `<div class="card"><h3>👤 کاربران</h3>`;
+
+          for (const x of users.rows) {
+            content += `
+              <div class="search-item">
+                ${avatar(x)}
+                <div>
+                  <a href="/user?id=${x.id}">
+                    <b>${escapeHtml(x.name)}</b>
+                  </a>
+                  <div class="muted">
+                    @${escapeHtml(x.username || "")}
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+
+          content += `</div>`;
+        }
+
+        const posts = await pool.query(
+          `SELECT p.*,u.name,u.username,u.avatar_url
+           FROM posts p
+           JOIN users u ON u.id=p.user_id
+           WHERE p.content ILIKE $1
+              OR p.caption ILIKE $1
+           ORDER BY p.created_at DESC
+           LIMIT 30`,
+          [`%${q}%`]
+        );
+
+        if (posts.rowCount) {
+          content += `<div class="card"><h3>📝 پست‌ها</h3>`;
+
+          for (const p of posts.rows) {
+            content += `
+              <article class="card">
+                <div class="row">
+                  ${avatar(p)}
+                  <b>${escapeHtml(p.name)}</b>
+                </div>
+                <div class="text">
+                  ${escapeHtml(p.content)}
+                </div>
+                ${mediaHtml(p.media_url,p.media_type)}
+                <a class="btn" href="/post?id=${p.id}">
+                  مشاهده
+                </a>
+              </article>
+            `;
+          }
+
+          content += `</div>`;
+        }
+
+        const tag = q.replace(/^#/, "").toLowerCase();
+
+        const tags = await pool.query(
+          `SELECT h.name,COUNT(ph.post_id)::int count
+           FROM hashtags h
+           JOIN post_hashtags ph
+             ON ph.hashtag_id=h.id
+           WHERE h.name ILIKE $1
+           GROUP BY h.name`,
+          [`%${tag}%`]
+        );
+
+        if (tags.rowCount) {
+          content += `<div class="card"><h3>#️⃣ هشتگ</h3>`;
+
+          for (const h of tags.rows) {
+            content += `
+              <a class="btn purple"
+                 href="/hashtag?name=${encodeURIComponent(h.name)}">
+                #${escapeHtml(h.name)}
+                (${h.count})
+              </a>
+            `;
+          }
+
+          content += `</div>`;
+        }
+
+        if (!users.rowCount && !posts.rowCount && !tags.rowCount) {
+          content += `
+            <div class="card empty">
+              نتیجه‌ای پیدا نشد.
+            </div>
+          `;
+        }
+      }
+
+      return sendHtml(res, 200, "جستجو", content, user);
+    }
+
+    if (method === "GET" && path === "/explore") {
+      const posts = await pool.query(
+        `SELECT p.*,u.name,u.username,u.avatar_url
+         FROM posts p
+         JOIN users u ON u.id=p.user_id
+         WHERE p.is_archived=false
+         ORDER BY
+           (SELECT COUNT(*) FROM likes l
+            WHERE l.post_id=p.id) DESC,
+           p.created_at DESC
+         LIMIT 30`
+      );
+
+      let content = `
+        <div class="card">
+          <h2>🔎 Explore</h2>
+          <p class="muted">
+            محتوای محبوب و پیشنهادی
+          </p>
+          <a class="btn blue" href="/search">
+            جستجو
+          </a>
+        </div>
+      `;
+
+      for (const p of posts.rows) {
+        content += `
+          <article class="card">
+            <div class="row">
+              ${avatar(p)}
+              <b>${escapeHtml(p.name)}</b>
+            </div>
+
+            <div class="text">
+              ${escapeHtml(p.content)}
+            </div>
+
+            ${mediaHtml(p.media_url,p.media_type)}
+
+            <a class="btn" href="/post?id=${p.id}">
+              مشاهده پست
+            </a>
+          </article>
+        `;
+      }
+
+      return sendHtml(res,200,"اکسپلور",content,user);
+    }
+
+    if (method === "GET" && path === "/hashtag") {
+      const name = (
+        parsed.searchParams.get("name") || ""
+      ).replace(/^#/,"").toLowerCase();
+
+      const posts = await pool.query(
+        `SELECT p.*,u.name,u.username,u.avatar_url
+         FROM posts p
+         JOIN users u ON u.id=p.user_id
+         JOIN post_hashtags ph ON ph.post_id=p.id
+         JOIN hashtags h ON h.id=ph.hashtag_id
+         WHERE h.name=$1
+         ORDER BY p.created_at DESC
+         LIMIT 50`,
+        [name]
+      );
+
+      let content = `
+        <div class="card">
+          <h2>#${escapeHtml(name)}</h2>
+          <div class="muted">
+            ${posts.rowCount} پست
+          </div>
+        </div>
+      `;
+
+      for (const p of posts.rows) {
+        content += `
+          <div class="card">
+            <div class="row">
+              ${avatar(p)}
+              <b>${escapeHtml(p.name)}</b>
+            </div>
+            <div class="text">${escapeHtml(p.content)}</div>
+            ${mediaHtml(p.media_url,p.media_type)}
+            <a class="btn" href="/post?id=${p.id}">
+              مشاهده
+            </a>
+          </div>
+        `;
+      }
+
+      return sendHtml(res,200,"هشتگ",content,user);
+    }
+
+    /*
+     * PROFILE
+     */
+
+    if (method === "GET" && path === "/profile") {
+      const stats = await pool.query(
+        `SELECT
+          (SELECT COUNT(*) FROM posts
+           WHERE user_id=$1 AND is_archived=false)::int posts,
+          (SELECT COUNT(*) FROM follows
+           WHERE following_id=$1)::int followers,
+          (SELECT COUNT(*) FROM follows
+           WHERE follower_id=$1)::int following,
+          (SELECT COUNT(*) FROM saved_posts
+           WHERE user_id=$1)::int saved`,
+        [user.id]
+      );
+
+      const posts = await pool.query(
+        `SELECT *
+         FROM posts
+         WHERE user_id=$1
+         ORDER BY is_pinned DESC,created_at DESC
+         LIMIT 50`,
+        [user.id]
+      );
+
+      const s = stats.rows[0];
+
+      let content = `
+        <div class="card">
+          <div class="row">
+            ${avatar(user)}
+            <div>
+              <h2>${escapeHtml(user.name)}</h2>
+              <div class="muted">
+                @${escapeHtml(user.username || "")}
+              </div>
+              <div>${escapeHtml(user.bio || "")}</div>
+            </div>
+          </div>
+
+          <div class="stats" style="margin-top:15px">
+            <span>📝 ${s.posts} پست</span>
+            <span>👥 ${s.followers} دنبال‌کننده</span>
+            <span>➕ ${s.following} دنبال‌شده</span>
+            <span>🔖 ${s.saved} ذخیره</span>
+          </div>
+        </div>
+
+        <div class="card menu">
+          <a class="btn" href="/edit-profile">✏️ ویرایش پروفایل</a>
+          <a class="btn purple" href="/saved">🔖 ذخیره‌شده‌ها</a>
+          <a class="btn blue" href="/followers?id=${user.id}">👥 دنبال‌کننده‌ها</a>
+          <a class="btn blue" href="/following?id=${user.id}">➕ دنبال‌شده‌ها</a>
+          <a class="btn" href="/stories">📖 استوری‌ها</a>
+          <a class="btn" href="/reels">🎞️ Reels</a>
+          <a class="btn" href="/notifications">🔔 اعلان‌ها</a>
+          <a class="btn gray" href="/settings">⚙️ تنظیمات</a>
+          <a class="btn gray" href="/change-password">🔐 تغییر رمز</a>
+          <a class="btn red" href="/blocked">🚫 مسدودشده‌ها</a>
+          <a class="btn orange" href="/jobs">💼 کاریابی</a>
+
+          <form method="post" action="/logout-all">
+            <button class="red full">
+              خروج از همه دستگاه‌ها
+            </button>
+          </form>
+        </div>
+
+        <div class="grid">
+      `;
+
+      for (const p of posts.rows) {
+        if (p.media_url) {
+          content += `
+            <a href="/post?id=${p.id}">
+              ${
+                p.media_type === "video"
+                  ? `<video src="${escapeHtml(p.media_url)}"></video>`
+                  : `<img src="${escapeHtml(p.media_url)}">`
+              }
+            </a>
+          `;
+        } else {
+          content += `
+            <a
+              href="/post?id=${p.id}"
+              style="
+                background:#fff;
+                border:1px solid #ddd;
+                padding:8px;
+                border-radius:8px;
+                min-height:120px;
+                text-decoration:none;
+                color:#222;
+              "
+            >
+              ${escapeHtml(p.content).slice(0,100)}
+            </a>
+          `;
+        }
+      }
+
+      content += `</div>`;
+
+      return sendHtml(res,200,"پروفایل من",content,user);
+    }
+
+    if (method === "GET" && path === "/user") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      if (!id) return redirect(res,"/");
+
+      const r = await pool.query(
+        `SELECT id,name,username,bio,avatar_url,is_private
+         FROM users
+         WHERE id=$1`,
+        [id]
+      );
+
+      if (!r.rowCount) {
+        return sendHtml(
+          res,
+          404,
+          "کاربر",
+          `<div class="card empty">کاربر پیدا نشد.</div>`,
+          user
+        );
+      }
+
+      const target = r.rows[0];
+
+      const following = await pool.query(
+        `SELECT 1 FROM follows
+         WHERE follower_id=$1 AND following_id=$2`,
+        [user.id,id]
+      );
+
+      const blocked = await pool.query(
+        `SELECT 1 FROM blocks
+         WHERE blocker_id=$1 AND blocked_id=$2`,
+        [user.id,id]
+      );
+
+      const followers = await pool.query(
+        `SELECT COUNT(*)::int n FROM follows
+         WHERE following_id=$1`,
+        [id]
+      );
+
+      const followingCount = await pool.query(
+        `SELECT COUNT(*)::int n FROM follows
+         WHERE follower_id=$1`,
+        [id]
+      );
+
+      const posts = await pool.query(
+        `SELECT *
+         FROM posts
+         WHERE user_id=$1
+           AND is_archived=false
+         ORDER BY is_pinned DESC,created_at DESC
+         LIMIT 30`,
+        [id]
+      );
+
+      let content = `
+        <div class="card">
+
+          <div class="row">
+            ${avatar(target)}
+            <div>
+              <h2>${escapeHtml(target.name)}</h2>
+              <div class="muted">
+                @${escapeHtml(target.username || "")}
+              </div>
+              <div>${escapeHtml(target.bio || "")}</div>
+            </div>
+          </div>
+
+          <div class="stats" style="margin-top:15px">
+            <span>👥 ${followers.rows[0].n}</span>
+            <span>➕ ${followingCount.rows[0].n}</span>
+            <span>📝 ${posts.rowCount}</span>
+          </div>
+      `;
+
+      if (id !== user.id) {
+        content += `
+          <div class="actions">
+            ${
+              blocked.rowCount
+                ? button(
+                    `/unblock?id=${id}`,
+                    "🔓 رفع مسدودی",
+                    "green"
+                  )
+                : button(
+                    `/block?id=${id}`,
+                    "🚫 مسدود کردن",
+                    "red"
+                  )
+            }
+
+            ${
+              following.rowCount
+                ? button(
+                    `/follow?id=${id}`,
+                    "➖ لغو دنبال",
+                    "gray"
+                  )
+                : button(
+                    `/follow?id=${id}`,
+                    target.is_private
+                      ? "➕ درخواست دنبال"
+                      : "➕ دنبال کردن",
+                    "blue"
+                  )
+            }
+
+            <a class="btn purple" href="/messages?user=${id}">
+              💬 پیام
+            </a>
+
+            <a class="btn gray" href="/report?user=${id}">
+              🚩 گزارش
+            </a>
+
+            ${button(
+              `/restrict?id=${id}`,
+              "🔕 محدود",
+              "orange"
+            )}
+
+            ${button(
+              `/mute?id=${id}`,
+              "🔇 بی‌صدا",
+              "gray"
+            )}
+          </div>
+        `;
+      }
+
+      content += `</div>`;
+
+      for (const p of posts.rows) {
+        content += `
+          <div class="card">
+            <div class="text">
+              ${escapeHtml(p.content)}
+            </div>
+            ${mediaHtml(p.media_url,p.media_type)}
+            <div class="actions">
+              <a class="btn" href="/post?id=${p.id}">
+                مشاهده
+              </a>
+
+              ${
+                p.user_id === user.id
+                  ? `
+                    <a class="btn" href="/edit-post?id=${p.id}">
+                      ✏️
+                    </a>
+                    ${button(
+                      `/archive-post?id=${p.id}`,
+                      p.is_archived ? "↩️" : "📦",
+                      "gray"
+                    )}
+                    ${button(
+                      `/pin-post?id=${p.id}`,
+                      p.is_pinned ? "📌 لغو پین" : "📌 پین",
+                      "purple"
+                    )}
+                  `
+                  : ""
+              }
+            </div>
+          </div>
+        `;
+      }
+
+      return sendHtml(res,200,"پروفایل",content,user);
+    }
+
+    /*
+     * FOLLOW
+     */
+
+    if (method === "POST" && path === "/follow") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      if (!id || id === user.id) {
+        return redirect(res,"/");
+      }
+
+      const target = await pool.query(
+        `SELECT is_private FROM users WHERE id=$1`,
+        [id]
+      );
+
+      if (!target.rowCount) return redirect(res,"/");
+
+      const existing = await pool.query(
+        `SELECT 1 FROM follows
+         WHERE follower_id=$1 AND following_id=$2`,
+        [user.id,id]
+      );
+
+      if (existing.rowCount) {
+        await pool.query(
+          `DELETE FROM follows
+           WHERE follower_id=$1 AND following_id=$2`,
+          [user.id,id]
+        );
+      } else if (target.rows[0].is_private) {
+        await pool.query(
+          `INSERT INTO follow_requests(
+             requester_id,target_id,status
+           )
+           VALUES($1,$2,'pending')
+           ON CONFLICT(requester_id,target_id)
+           DO UPDATE SET status='pending'`,
+          [user.id,id]
+        );
+
+        await notify(
+          id,
+          user.id,
+          "follow_request"
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO follows(follower_id,following_id)
+           VALUES($1,$2)
+           ON CONFLICT DO NOTHING`,
+          [user.id,id]
+        );
+
+        await notify(id,user.id,"follow");
+      }
+
+      return redirect(res,`/user?id=${id}`);
+    }
+
+    if (method === "POST" && path === "/accept-follow") {
+      const requestId = validId(parsed.searchParams.get("id"));
+
+      const r = await pool.query(
+        `SELECT requester_id
+         FROM follow_requests
+         WHERE id=$1
+           AND target_id=$2
+           AND status='pending'`,
+        [requestId,user.id]
+      );
+
+      if (r.rowCount) {
+        await pool.query(
+          `INSERT INTO follows(follower_id,following_id)
+           VALUES($1,$2)
+           ON CONFLICT DO NOTHING`,
+          [r.rows[0].requester_id,user.id]
+        );
+
+        await pool.query(
+          `UPDATE follow_requests
+           SET status='accepted'
+           WHERE id=$1`,
+          [requestId]
+        );
+
+        await notify(
+          r.rows[0].requester_id,
+          user.id,
+          "follow_accepted"
+        );
+      }
+
+      return redirect(res,"/notifications");
+    }
+
+    if (method === "POST" && path === "/reject-follow") {
+      const requestId = validId(parsed.searchParams.get("id"));
+
+      await pool.query(
+        `UPDATE follow_requests
+         SET status='rejected'
+         WHERE id=$1 AND target_id=$2`,
+        [requestId,user.id]
+      );
+
+      return redirect(res,"/notifications");
+    }
+
+    /*
+     * FOLLOWERS / FOLLOWING
+     */
+
+    if (method === "GET" && path === "/followers") {
+      const id = validId(parsed.searchParams.get("id")) || user.id;
+
+      const r = await pool.query(
+        `SELECT u.id,u.name,u.username,u.avatar_url
+         FROM follows f
+         JOIN users u ON u.id=f.follower_id
+         WHERE f.following_id=$1
+         ORDER BY f.created_at DESC`,
+        [id]
+      );
+
+      let content = `<div class="card"><h2>👥 دنبال‌کننده‌ها</h2></div>`;
+
+      for (const x of r.rows) {
+        content += `
+          <div class="card row">
+            ${avatar(x)}
+            <div>
+              <a href="/user?id=${x.id}">
+                <b>${escapeHtml(x.name)}</b>
+              </a>
+              <div class="muted">
+                @${escapeHtml(x.username || "")}
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      return sendHtml(res,200,"دنبال‌کننده‌ها",content,user);
+    }
+
+    if (method === "GET" && path === "/following") {
+      const id = validId(parsed.searchParams.get("id")) || user.id;
+
+      const r = await pool.query(
+        `SELECT u.id,u.name,u.username,u.avatar_url
+         FROM follows f
+         JOIN users u ON u.id=f.following_id
+         WHERE f.follower_id=$1
+         ORDER BY f.created_at DESC`,
+        [id]
+      );
+
+      let content = `<div class="card"><h2>➕ دنبال‌شده‌ها</h2></div>`;
+
+      for (const x of r.rows) {
+        content += `
+          <div class="card row">
+            ${avatar(x)}
+            <div>
+              <a href="/user?id=${x.id}">
+                <b>${escapeHtml(x.name)}</b>
+              </a>
+              <div class="muted">
+                @${escapeHtml(x.username || "")}
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      return sendHtml(res,200,"دنبال‌شده‌ها",content,user);
+    }
+
+    /*
+     * BLOCK / RESTRICT / MUTE
+     */
+
+    if (method === "POST" && path === "/block") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      if (id && id !== user.id) {
+        await pool.query(
+          `INSERT INTO blocks(blocker_id,blocked_id)
+           VALUES($1,$2)
+           ON CONFLICT DO NOTHING`,
+          [user.id,id]
+        );
+
+        await pool.query(
+          `DELETE FROM follows
+           WHERE (follower_id=$1 AND following_id=$2)
+              OR (follower_id=$2 AND following_id=$1)`,
+          [user.id,id]
+        );
+      }
+
+      return redirect(res,`/user?id=${id}`);
+    }
+
+    if (method === "POST" && path === "/unblock") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      await pool.query(
+        `DELETE FROM blocks
+         WHERE blocker_id=$1 AND blocked_id=$2`,
+        [user.id,id]
+      );
+
+      return redirect(res,`/user?id=${id}`);
+    }
+
+    if (method === "POST" && path === "/restrict") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      if (id && id !== user.id) {
+        const exists = await pool.query(
+          `SELECT 1 FROM restrictions
+           WHERE user_id=$1 AND target_id=$2`,
+          [user.id,id]
+        );
+
+        if (exists.rowCount) {
+          await pool.query(
+            `DELETE FROM restrictions
+             WHERE user_id=$1 AND target_id=$2`,
+            [user.id,id]
+          );
+        } else {
+          await pool.query(
+            `INSERT INTO restrictions(user_id,target_id)
+             VALUES($1,$2)
+             ON CONFLICT DO NOTHING`,
+            [user.id,id]
+          );
+        }
+      }
+
+      return redirect(res,`/user?id=${id}`);
+    }
+
+    if (method === "POST" && path === "/mute") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      if (id && id !== user.id) {
+        const exists = await pool.query(
+          `SELECT 1 FROM mutes
+           WHERE user_id=$1 AND target_id=$2`,
+          [user.id,id]
+        );
+
+        if (exists.rowCount) {
+          await pool.query(
+            `DELETE FROM mutes
+             WHERE user_id=$1 AND target_id=$2`,
+            [user.id,id]
+          );
+        } else {
+          await pool.query(
+            `INSERT INTO mutes(user_id,target_id)
+             VALUES($1,$2)
+             ON CONFLICT DO NOTHING`,
+            [user.id,id]
+          );
+        }
+      }
+
+      return redirect(res,`/user?id=${id}`);
+    }
+
+    if (method === "GET" && path === "/blocked") {
+      const r = await pool.query(
+        `SELECT u.id,u.name,u.username,u.avatar_url
+         FROM blocks b
+         JOIN users u ON u.id=b.blocked_id
+         WHERE b.blocker_id=$1
+         ORDER BY u.name`,
+        [user.id]
+      );
+
+      let content = `<div class="card"><h2>🚫 مسدودشده‌ها</h2></div>`;
+
+      for (const x of r.rows) {
+        content += `
+          <div class="card">
+            <div class="row">
+              ${avatar(x)}
+              <a href="/user?id=${x.id}">
+                <b>${escapeHtml(x.name)}</b>
+              </a>
+            </div>
+
+            <div class="actions">
+              ${button(
+                `/unblock?id=${x.id}`,
+                "🔓 رفع مسدودی",
+                "green"
+              )}
+            </div>
+          </div>
+        `;
+      }
+
+      if (!r.rowCount) {
+        content += `
+          <div class="card empty">
+            کاربری مسدود نشده است.
+          </div>
+        `;
+      }
+
+      return sendHtml(res,200,"مسدودشده‌ها",content,user);
+    }
+
+    /*
+     * SAVED
+     */
+
+    if (method === "GET" && path === "/saved") {
+      const r = await pool.query(
+        `SELECT p.*,u.name,u.username,u.avatar_url
+         FROM saved_posts s
+         JOIN posts p ON p.id=s.post_id
+         JOIN users u ON u.id=p.user_id
+         WHERE s.user_id=$1
+         ORDER BY s.created_at DESC`,
+        [user.id]
+      );
+
+      let content = `
+        <div class="card">
+          <h2>🔖 ذخیره‌شده‌ها</h2>
+          <a class="btn purple" href="/collections">
+            مجموعه‌ها
+          </a>
+        </div>
+      `;
+
+      for (const p of r.rows) {
+        content += `
+          <div class="card">
+            <div class="row">
+              ${avatar(p)}
+              <b>${escapeHtml(p.name)}</b>
+            </div>
+
+            <div class="text">
+              ${escapeHtml(p.content)}
+            </div>
+
+            ${mediaHtml(p.media_url,p.media_type)}
+
+            <div class="actions">
+              <a class="btn" href="/post?id=${p.id}">
+                مشاهده
+              </a>
+
+              ${button(
+                `/save?id=${p.id}`,
+                "🗑️ حذف",
+                "red"
+              )}
+            </div>
+          </div>
+        `;
+      }
+
+      if (!r.rowCount) {
+        content += `
+          <div class="card empty">
+            هنوز پستی ذخیره نکرده‌ای.
+          </div>
+        `;
+      }
+
+      return sendHtml(res,200,"ذخیره‌شده‌ها",content,user);
+    }
+
+    /*
+     * COLLECTIONS
+     */
+
+    if (method === "GET" && path === "/collections") {
+      const r = await pool.query(
+        `SELECT
+           c.*,
+           COUNT(ci.post_id)::int items
+         FROM collections c
+         LEFT JOIN collection_items ci
+           ON ci.collection_id=c.id
+         WHERE c.user_id=$1
+         GROUP BY c.id
+         ORDER BY c.created_at DESC`,
+        [user.id]
+      );
+
+      let content = `
+        <div class="card">
+          <h2>📁 مجموعه‌ها</h2>
+          <form method="post" action="/collections">
+            <input name="name" maxlength="100" placeholder="نام مجموعه" required>
+            <button class="green">ایجاد مجموعه</button>
+          </form>
+        </div>
+      `;
+
+      for (const c of r.rows) {
+        content += `
+          <div class="card">
+            <b>📁 ${escapeHtml(c.name)}</b>
+            <div class="muted">
+              ${c.items} پست
+            </div>
+
+            ${button(
+              `/delete-collection?id=${c.id}`,
+              "🗑️ حذف",
+              "red"
+            )}
+          </div>
+        `;
+      }
+
+      return sendHtml(res,200,"مجموعه‌ها",content,user);
+    }
+
+    if (method === "POST" && path === "/collections") {
+      const b = await readBody(req);
+      const name = (b.get("name") || "").trim();
+
+      if (name) {
+        await pool.query(
+          `INSERT INTO collections(user_id,name)
+           VALUES($1,$2)`,
+          [user.id,name]
+        );
+      }
+
+      return redirect(res,"/collections");
+    }
+
+    if (method === "POST" && path === "/delete-collection") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      await pool.query(
+        `DELETE FROM collections
+         WHERE id=$1 AND user_id=$2`,
+        [id,user.id]
+      );
+
+      return redirect(res,"/collections");
+    }
+
+    /*
+     * NOTIFICATIONS
+     */
+
+    if (method === "GET" && path === "/notifications") {
+      const r = await pool.query(
+        `SELECT
+           n.*,
+           a.name actor,
+           a.username actor_username
+         FROM notifications n
+         LEFT JOIN users a ON a.id=n.actor_id
+         WHERE n.user_id=$1
+         ORDER BY n.created_at DESC
+         LIMIT 100`,
+        [user.id]
+      );
+
+      let content = `
+        <div class="card">
+          <h2>🔔 اعلان‌ها</h2>
+
+          ${button(
+            "/notifications-read",
+            "✓ خواندن همه",
+            "blue"
+          )}
+
+          ${button(
+            "/notifications-delete",
+            "🗑️ حذف اعلان‌ها",
+            "red"
+          )}
+        </div>
+      `;
+
+      for (const n of r.rows) {
+        const text = {
+          like: "پست شما را پسندید.",
+          comment: "روی پست شما نظر داد.",
+          follow: "شما را دنبال کرد.",
+          follow_request: "درخواست دنبال‌کردن فرستاد.",
+          follow_accepted: "درخواست دنبال‌کردن شما را پذیرفت.",
+          message: "برای شما پیام فرستاد.",
+          mention: "شما را منشن کرد.",
+          story: "با استوری شما تعامل کرد."
+        }[n.type] || "یک اعلان جدید.";
+
+        content += `
+          <div class="card">
+            🔔
+            <b>${escapeHtml(n.actor || "کاربر")}</b>
+            ${text}
+
+            <div class="muted">
+              ${new Date(n.created_at).toLocaleString("fa-IR")}
+            </div>
+
+            ${
+              n.type === "follow_request"
+                ? `
+                  <div class="actions">
+                    ${button(
+                      `/accept-follow?id=${n.id}`,
+                      "قبول",
+                      "green"
+                    )}
+
+                    ${button(
+                      `/reject-follow?id=${n.id}`,
+                      "رد",
+                      "red"
+                    )}
+                  </div>
+                `
+                : ""
+            }
+
+            ${
+              n.post_id
+                ? `<a class="btn gray" href="/post?id=${n.post_id}">
+                     مشاهده
+                   </a>`
+                : ""
+            }
+          </div>
+        `;
+      }
+
+      if (!r.rowCount) {
+        content += `
+          <div class="card empty">
+            اعلانی ندارید.
+          </div>
+        `;
+      }
+
+      await pool.query(
+        `UPDATE notifications
+         SET read=true
+         WHERE user_id=$1`,
+        [user.id]
+      );
+
+      return sendHtml(res,200,"اعلان‌ها",content,user);
+    }
+
+    if (method === "POST" && path === "/notifications-read") {
+      await pool.query(
+        `UPDATE notifications
+         SET read=true
+         WHERE user_id=$1`,
+        [user.id]
+      );
+
+      return redirect(res,"/notifications");
+    }
+
+    if (method === "POST" && path === "/notifications-delete") {
+      await pool.query(
+        `DELETE FROM notifications
+         WHERE user_id=$1`,
+        [user.id]
+      );
+
+      return redirect(res,"/notifications");
+    }
+
+    /*
+     * MESSAGES
+     * ساختار جدید conversation را دارد،
+     * ولی sender_id / receiver_id / content قدیمی هم حفظ شده.
+     */
+
+    if (method === "GET" && path === "/messages") {
+      const otherId = validId(
+        parsed.searchParams.get("user")
+      );
+
+      if (otherId) {
+        const target = await pool.query(
+          `SELECT id,name,username,avatar_url
+           FROM users
+           WHERE id=$1`,
+          [otherId]
+        );
+
+        if (!target.rowCount) {
+          return redirect(res,"/messages");
+        }
+
+        const conversationId =
+          await createConversation(user.id,otherId);
+
+        const messages = await pool.query(
+          `SELECT
+             m.*,
+             u.name,
+             u.username,
+             u.avatar_url
+           FROM messages m
+           JOIN users u ON u.id=m.sender_id
+           WHERE m.conversation_id=$1
+           ORDER BY m.created_at ASC
+           LIMIT 200`,
+          [conversationId]
+        );
+
+        await pool.query(
+          `UPDATE messages
+           SET read_at=NOW()
+           WHERE conversation_id=$1
+             AND receiver_id=$2
+             AND read_at IS NULL`,
+          [conversationId,user.id]
+        );
+
+        let content = `
+          <div class="card">
+            <div class="row">
+              ${avatar(target.rows[0])}
+              <div>
+                <h3>
+                  ${escapeHtml(target.rows[0].name)}
+                </h3>
+                <div class="muted">
+                  @${escapeHtml(target.rows[0].username || "")}
+                </div>
+              </div>
+            </div>
+
+            <form method="post"
+                  action="/messages?user=${otherId}">
+
+              <textarea
+                name="content"
+                maxlength="5000"
+                placeholder="پیام..."
+                required
+              ></textarea>
+
+              <input
+                name="media_url"
+                type="url"
+                placeholder="لینک عکس/ویدئو، اختیاری"
+              >
+
+              <button class="blue full">
+                ارسال پیام
+              </button>
+            </form>
+          </div>
+        `;
+
+        for (const m of messages.rows) {
+          content += `
+            <div class="card">
+              <div class="row">
+                ${avatar(m)}
+                <div>
+                  <b>${escapeHtml(m.name)}</b>
+                  <div class="muted">
+                    ${new Date(m.created_at).toLocaleString("fa-IR")}
+                  </div>
+                </div>
+              </div>
+
+              ${
+                m.deleted
+                  ? `<div class="muted">این پیام حذف شده است.</div>`
+                  : `<div class="text">${escapeHtml(m.content)}</div>`
+              }
+
+              ${mediaHtml(m.media_url,m.media_type)}
+
+              <div class="stats">
+                <span>
+                  ${
+                    m.read_at
+                      ? "✓✓ خوانده شد"
+                      : "✓ ارسال شد"
+                  }
+                </span>
+              </div>
+
+              ${
+                m.sender_id === user.id && !m.deleted
+                  ? button(
+                      `/delete-message?id=${m.id}&user=${otherId}`,
+                      "🗑️ حذف",
+                      "red"
+                    )
+                  : ""
+              }
+            </div>
+          `;
+        }
+
+        return sendHtml(
+          res,
+          200,
+          `پیام با ${target.rows[0].name}`,
+          content,
+          user
+        );
+      }
+
+      const conversations = await pool.query(
+        `SELECT
+           c.id,
+           c.updated_at,
+           (
+             SELECT u.id
+             FROM conversation_members cm
+             JOIN users u ON u.id=cm.user_id
+             WHERE cm.conversation_id=c.id
+               AND cm.user_id<>$1
+             LIMIT 1
+           ) other_id,
+           (
+             SELECT u.name
+             FROM conversation_members cm
+             JOIN users u ON u.id=cm.user_id
+             WHERE cm.conversation_id=c.id
+               AND cm.user_id<>$1
+             LIMIT 1
+           ) other_name,
+           (
+             SELECT u.username
+             FROM conversation_members cm
+             JOIN users u ON u.id=cm.user_id
+             WHERE cm.conversation_id=c.id
+               AND cm.user_id<>$1
+             LIMIT 1
+           ) other_username,
+           (
+             SELECT m.content
+             FROM messages m
+             WHERE m.conversation_id=c.id
+             ORDER BY m.created_at DESC
+             LIMIT 1
+           ) last_message
+         FROM conversations c
+         JOIN conversation_members mine
+           ON mine.conversation_id=c.id
+          AND mine.user_id=$1
+         ORDER BY c.updated_at DESC`,
+        [user.id]
+      );
+
+      let content = `
+        <div class="card">
+          <h2>💬 پیام‌ها</h2>
+          <a class="btn blue" href="/search">
+            🔎 انتخاب کاربر
+          </a>
+        </div>
+      `;
+
+      for (const c of conversations.rows) {
+        content += `
+          <a
+            class="card"
+            style="display:block;text-decoration:none;color:#222"
+            href="/messages?user=${c.other_id}"
+          >
+            <b>${escapeHtml(c.other_name || "کاربر")}</b>
+
+            <div class="muted">
+              @${escapeHtml(c.other_username || "")}
+            </div>
+
+            <div class="text">
+              ${escapeHtml(c.last_message || "گفتگوی جدید")}
+            </div>
+          </a>
+        `;
+      }
+
+      if (!conversations.rowCount) {
+        content += `
+          <div class="card empty">
+            هنوز گفتگویی ندارید.
+          </div>
+        `;
+      }
+
+      return sendHtml(res,200,"پیام‌ها",content,user);
+    }
+
+    if (method === "POST" && path === "/messages") {
+      const otherId = validId(
+        parsed.searchParams.get("user")
+      );
+
+      const b = await readBody(req);
+
+      const content = (b.get("content") || "").trim();
+      const media = (b.get("media_url") || "").trim() || null;
+
+      if (!otherId || otherId === user.id) {
+        return redirect(res,"/messages");
+      }
+
+      if (!content && !media) {
+        return redirect(res,`/messages?user=${otherId}`);
+      }
+
+      const settings = await pool.query(
+        `SELECT allow_messages
+         FROM user_settings
+         WHERE user_id=$1`,
+        [otherId]
+      );
+
+      if (
+        settings.rowCount &&
+        settings.rows[0].allow_messages === false
+      ) {
+        return redirect(res,`/messages?user=${otherId}`);
+      }
+
+      const conversationId =
+        await createConversation(user.id,otherId);
+
+      const mediaType = media
+        ? "image"
+        : null;
+
+      await pool.query(
+        `INSERT INTO messages(
+           sender_id,
+           receiver_id,
+           conversation_id,
+           content,
+           media_url,
+           media_type
+         )
+         VALUES($1,$2,$3,$4,$5,$6)`,
+        [
+          user.id,
+          otherId,
+          conversationId,
+          content,
+          media,
+          mediaType
+        ]
+      );
+
+      await pool.query(
+        `UPDATE conversations
+         SET updated_at=NOW()
+         WHERE id=$1`,
+        [conversationId]
+      );
+
+      await notify(
+        otherId,
+        user.id,
+        "message"
+      );
+
+      return redirect(res,`/messages?user=${otherId}`);
+    }
+
+    if (method === "POST" && path === "/delete-message") {
+      const id = validId(parsed.searchParams.get("id"));
+      const otherId = validId(
+        parsed.searchParams.get("user")
+      );
+
+      await pool.query(
+        `UPDATE messages
+         SET deleted=true,
+             content='',
+             media_url=NULL
+         WHERE id=$1 AND sender_id=$2`,
+        [id,user.id]
+      );
+
+      return redirect(
+        res,
+        otherId ? `/messages?user=${otherId}` : "/messages"
+      );
+    }
+
+    /*
+     * STORIES
+     */
+
+    if (method === "GET" && path === "/new-story") {
+      return sendHtml(
+        res,
+        200,
+        "استوری جدید",
+        `
+        <div class="card">
+          <form method="post" action="/new-story">
+            <input
+              name="media_url"
+              type="url"
+              placeholder="لینک عکس یا ویدئو"
+            >
+
+            <select name="media_type">
+              <option value="image">تصویر</option>
+              <option value="video">ویدئو</option>
+            </select>
+
+            <textarea
+              name="text"
+              maxlength="2000"
+              placeholder="متن استوری"
+            ></textarea>
+
+            <button class="purple full">
+              انتشار استوری
+            </button>
+          </form>
+        </div>
+        `,
+        user
+      );
+    }
+
+    if (method === "POST" && path === "/new-story") {
+      const b = await readBody(req);
+
+      const media = (b.get("media_url") || "").trim() || null;
+      const type = b.get("media_type") === "video"
+        ? "video"
+        : "image";
+      const text = (b.get("text") || "").trim();
+
+      if (media || text) {
+        await pool.query(
+          `INSERT INTO stories(
+             user_id,media_url,media_type,text
+           )
+           VALUES($1,$2,$3,$4)`,
+          [user.id,media,type,text]
+        );
+      }
+
+      return redirect(res,"/");
+    }
+
+    if (method === "GET" && path === "/story") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      const r = await pool.query(
+        `SELECT s.*,u.name,u.username,u.avatar_url
+         FROM stories s
+         JOIN users u ON u.id=s.user_id
+         WHERE s.id=$1
+           AND s.expires_at>NOW()`,
+        [id]
+      );
+
+      if (!r.rowCount) {
+        return sendHtml(
+          res,
+          404,
+          "استوری",
+          `<div class="card empty">استوری پیدا نشد.</div>`,
+          user
+        );
+      }
+
+      const s = r.rows[0];
+
+      await pool.query(
+        `INSERT INTO story_views(story_id,user_id)
+         VALUES($1,$2)
+         ON CONFLICT DO NOTHING`,
+        [id,user.id]
+      );
+
+      let content = `
+        <div class="story">
+          <div class="row">
+            ${avatar(s)}
+            <b>${escapeHtml(s.name)}</b>
+          </div>
+
+          ${mediaHtml(s.media_url,s.media_type)}
+
+          <div class="text">
+            ${escapeHtml(s.text)}
+          </div>
+
+          <div class="actions">
+            ${button(
+              `/story-react?id=${id}&reaction=❤️`,
+              "❤️",
+              "pink"
+            )}
+            ${button(
+              `/story-react?id=${id}&reaction=😂`,
+              "😂",
+              "gray"
+            )}
+          </div>
+        </div>
+      `;
+
+      if (s.user_id === user.id) {
+        const views = await pool.query(
+          `SELECT COUNT(*)::int n
+           FROM story_views
+           WHERE story_id=$1`,
+          [id]
+        );
+
+        content += `
+          <div class="card">
+            👁️ ${views.rows[0].n} بازدید
+            ${button(
+              `/delete-story?id=${id}`,
+              "🗑️ حذف",
+              "red"
+            )}
+          </div>
+        `;
+      }
+
+      return sendHtml(res,200,"استوری",content,user);
+    }
+
+    if (method === "POST" && path === "/story-react") {
+      const id = validId(parsed.searchParams.get("id"));
+      const reaction = parsed.searchParams.get("reaction") || "❤️";
+
+      await pool.query(
+        `INSERT INTO story_reactions(
+           story_id,user_id,reaction
+         )
+         VALUES($1,$2,$3)
+         ON CONFLICT(story_id,user_id)
+         DO UPDATE SET reaction=EXCLUDED.reaction`,
+        [id,user.id,reaction]
+      );
+
+      const owner = await pool.query(
+        `SELECT user_id FROM stories WHERE id=$1`,
+        [id]
+      );
+
+      if (owner.rowCount) {
+        await notify(
+          owner.rows[0].user_id,
+          user.id,
+          "story"
+        );
+      }
+
+      return redirect(res,`/story?id=${id}`);
+    }
+
+    if (method === "POST" && path === "/delete-story") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      await pool.query(
+        `DELETE FROM stories
+         WHERE id=$1 AND user_id=$2`,
+        [id,user.id]
+      );
+
+      return redirect(res,"/");
+    }
+
+    if (method === "GET" && path === "/stories") {
+      const r = await pool.query(
+        `SELECT s.*,u.name,u.username,u.avatar_url
+         FROM stories s
+         JOIN users u ON u.id=s.user_id
+         WHERE s.user_id=$1
+         ORDER BY s.created_at DESC
+         LIMIT 100`,
+        [user.id]
+      );
+
+      let content = `
+        <div class="card">
+          <h2>📖 استوری‌های من</h2>
+          <a class="btn purple" href="/new-story">
+            ➕ استوری جدید
+          </a>
+        </div>
+      `;
+
+      for (const s of r.rows) {
+        content += `
+          <div class="card">
+            ${mediaHtml(s.media_url,s.media_type)}
+            <div class="text">${escapeHtml(s.text)}</div>
+            <div class="muted">
+              ${new Date(s.created_at).toLocaleString("fa-IR")}
+            </div>
+            <div class="actions">
+              <a class="btn" href="/story?id=${s.id}">
+                مشاهده
+              </a>
+              ${button(
+                `/delete-story?id=${s.id}`,
+                "🗑️ حذف",
+                "red"
+              )}
+            </div>
+          </div>
+        `;
+      }
+
+      return sendHtml(res,200,"استوری‌ها",content,user);
+    }
+
+    /*
+     * REELS
+     */
+
+    if (method === "GET" && path === "/new-reel") {
+      return sendHtml(
+        res,
+        200,
+        "Reel جدید",
+        `
+        <div class="card">
+          <form method="post" action="/new-reel">
+
+            <input
+              name="video_url"
+              type="url"
+              placeholder="لینک ویدئو"
+              required
+            >
+
+            <input
+              name="thumbnail_url"
+              type="url"
+              placeholder="تصویر بندانگشتی، اختیاری"
+            >
+
+            <textarea
+              name="caption"
+              maxlength="5000"
+              placeholder="کپشن #هشتگ"
+            ></textarea>
+
+            <input
+              name="location"
+              maxlength="200"
+              placeholder="موقعیت"
+            >
+
+            <button class="blue full">
+              انتشار Reel
+            </button>
+          </form>
+        </div>
+        `,
+        user
+      );
+    }
+
+    if (method === "POST" && path === "/new-reel") {
+      const b = await readBody(req);
+
+      const video = (b.get("video_url") || "").trim();
+      const thumb = (b.get("thumbnail_url") || "").trim() || null;
+      const caption = (b.get("caption") || "").trim();
+      const location = (b.get("location") || "").trim() || null;
+
+      if (video) {
+        await pool.query(
+          `INSERT INTO reels(
+             user_id,caption,video_url,thumbnail_url,location
+           )
+           VALUES($1,$2,$3,$4,$5)`,
+          [user.id,caption,video,thumb,location]
+        );
+      }
+
+      return redirect(res,"/reels");
+    }
+
+    if (method === "GET" && path === "/reels") {
+      const r = await pool.query(
+        `SELECT
+           r.*,
+           u.name,
+           u.username,
+           u.avatar_url,
+           (SELECT COUNT(*) FROM reel_likes
+            WHERE reel_id=r.id)::int likes,
+           (SELECT COUNT(*) FROM reel_comments
+            WHERE reel_id=r.id)::int comments,
+           (SELECT COUNT(*) FROM reel_views
+            WHERE reel_id=r.id)::int views,
+           EXISTS(
+             SELECT 1 FROM reel_likes
+             WHERE reel_id=r.id AND user_id=$1
+           ) liked
+         FROM reels r
+         JOIN users u ON u.id=r.user_id
+         ORDER BY r.created_at DESC
+         LIMIT 50`,
+        [user.id]
+      );
+
+      let content = `
+        <div class="card">
+          <h2>🎞️ Reels</h2>
+          <a class="btn blue" href="/new-reel">
+            ➕ Reel جدید
+          </a>
+        </div>
+      `;
+
+      for (const x of r.rows) {
+        await pool.query(
+          `INSERT INTO reel_views(reel_id,user_id)
+           VALUES($1,$2)`,
+          [x.id,user.id]
+        );
+
+        content += `
+          <div class="card">
+
+            <div class="row">
+              ${avatar(x)}
+              <div>
+                <b>${escapeHtml(x.name)}</b>
+                <div class="muted">
+                  @${escapeHtml(x.username || "")}
+                </div>
+              </div>
+            </div>
+
+            <video
+              class="media"
+              controls
+              preload="metadata"
+              poster="${escapeHtml(x.thumbnail_url || "")}"
+            >
+              <source src="${escapeHtml(x.video_url)}">
+            </video>
+
+            <div class="text">
+              ${escapeHtml(x.caption)}
+            </div>
+
+            <div class="stats">
+              <span>❤️ ${x.likes}</span>
+              <span>💬 ${x.comments}</span>
+              <span>👁️ ${x.views}</span>
+            </div>
+
+            <div class="actions">
+              ${button(
+                `/reel-like?id=${x.id}`,
+                x.liked ? "💔" : "❤️",
+                "pink"
+              )}
+
+              ${
+                x.user_id === user.id
+                  ? button(
+                      `/delete-reel?id=${x.id}`,
+                      "🗑️ حذف",
+                      "red"
+                    )
+                  : ""
+              }
+
+              <a class="btn gray" href="/report?reel=${x.id}">
+                🚩
+              </a>
+            </div>
+
+          </div>
+        `;
+      }
+
+      return sendHtml(res,200,"Reels",content,user);
+    }
+
+    if (method === "POST" && path === "/reel-like") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      const exists = await pool.query(
+        `SELECT 1 FROM reel_likes
+         WHERE user_id=$1 AND reel_id=$2`,
+        [user.id,id]
+      );
+
+      if (exists.rowCount) {
+        await pool.query(
+          `DELETE FROM reel_likes
+           WHERE user_id=$1 AND reel_id=$2`,
+          [user.id,id]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO reel_likes(user_id,reel_id)
+           VALUES($1,$2)
+           ON CONFLICT DO NOTHING`,
+          [user.id,id]
+        );
+      }
+
+      return redirect(res,"/reels");
+    }
+
+    if (method === "POST" && path === "/delete-reel") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      await pool.query(
+        `DELETE FROM reels
+         WHERE id=$1 AND user_id=$2`,
+        [id,user.id]
+      );
+
+      return redirect(res,"/reels");
+    }
+
+    /*
+     * REPORT
+     */
+
+    if (method === "GET" && path === "/report") {
+      const post = validId(parsed.searchParams.get("post"));
+      const comment = validId(parsed.searchParams.get("comment"));
+      const reportedUser = validId(parsed.searchParams.get("user"));
+      const reel = validId(parsed.searchParams.get("reel"));
+
+      return sendHtml(
+        res,
+        200,
+        "گزارش",
+        `
+        <div class="card">
+          <form method="post" action="/report">
+
+            <input type="hidden" name="post" value="${post || ""}">
+            <input type="hidden" name="comment" value="${comment || ""}">
+            <input type="hidden" name="user" value="${reportedUser || ""}">
+            <input type="hidden" name="reel" value="${reel || ""}">
+
+            <textarea
+              name="reason"
+              maxlength="2000"
+              placeholder="دلیل گزارش"
+              required
+            ></textarea>
+
+            <button class="red full">
+              ارسال گزارش
+            </button>
+          </form>
+        </div>
+        `,
+        user
+      );
+    }
+
+    if (method === "POST" && path === "/report") {
+      const b = await readBody(req);
+
+      const postId = validId(b.get("post"));
+      const commentId = validId(b.get("comment"));
+      const reportedUser = validId(b.get("user"));
+      const reelId = validId(b.get("reel"));
+
+      const reason = (b.get("reason") || "").trim();
+
+      if (reason) {
+        await pool.query(
+          `INSERT INTO reports(
+             reporter_id,
+             post_id,
+             comment_id,
+             reported_user_id,
+             reason
+           )
+           VALUES($1,$2,$3,$4,$5)`,
+          [
+            user.id,
+            postId,
+            commentId,
+            reportedUser,
+            reason
+          ]
+        );
+      }
+
+      return redirect(res,"/");
+    }
+
+    /*
+     * PROFILE EDIT
+     */
+
+    if (method === "GET" && path === "/edit-profile") {
+      return sendHtml(
+        res,
+        200,
+        "ویرایش پروفایل",
+        `
+        <div class="card">
+          <form method="post" action="/edit-profile">
+
+            <input
+              name="name"
+              maxlength="80"
+              value="${escapeHtml(user.name)}"
+              placeholder="نام"
+              required
+            >
+
+            <input
+              name="username"
+              maxlength="30"
+              value="${escapeHtml(user.username || "")}"
+              placeholder="نام کاربری"
+              required
+            >
+
+            <textarea
+              name="bio"
+              maxlength="500"
+              placeholder="بیو"
+            >${escapeHtml(user.bio || "")}</textarea>
+
+            <input
+              name="avatar_url"
+              type="url"
+              value="${escapeHtml(user.avatar_url || "")}"
+              placeholder="لینک تصویر پروفایل"
+            >
+
+            <label>
+              <input
+                type="checkbox"
+                name="private"
+                ${user.is_private ? "checked" : ""}
+              >
+              حساب خصوصی
+            </label>
+
+            <button class="green full">
+              ذخیره
+            </button>
+
+          </form>
+        </div>
+        `,
+        user
+      );
+    }
+
+    if (method === "POST" && path === "/edit-profile") {
+      const b = await readBody(req);
+
+      const name = (b.get("name") || "").trim();
+      const username = (b.get("username") || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g,"");
+
+      const bio = (b.get("bio") || "").trim();
+      const avatarUrl = (b.get("avatar_url") || "").trim() || null;
+      const isPrivate = b.has("private");
+
+      if (name && username) {
+        const duplicate = await pool.query(
+          `SELECT id FROM users
+           WHERE username=$1 AND id<>$2`,
+          [username,user.id]
+        );
+
+        if (!duplicate.rowCount) {
+          await pool.query(
+            `UPDATE users
+             SET name=$1,
+                 username=$2,
+                 bio=$3,
+                 avatar_url=$4,
+                 is_private=$5
+             WHERE id=$6`,
+            [
+              name,
+              username,
+              bio,
+              avatarUrl,
+              isPrivate,
+              user.id
+            ]
+          );
+        }
+      }
+
+      return redirect(res,"/profile");
+    }
+
+    /*
+     * PASSWORD
+     */
+
+    if (method === "GET" && path === "/change-password") {
+      return sendHtml(
+        res,
+        200,
+        "تغییر رمز",
+        `
+        <div class="card">
+          <form method="post" action="/change-password">
+            <input
+              name="old"
+              type="password"
+              placeholder="رمز فعلی"
+              required
+            >
+
+            <input
+              name="new"
+              type="password"
+              minlength="6"
+              placeholder="رمز جدید"
+              required
+            >
+
+            <button class="green full">
+              تغییر رمز
+            </button>
+          </form>
+        </div>
+        `,
+        user
+      );
+    }
+
+    if (method === "POST" && path === "/change-password") {
+      const b = await readBody(req);
+
+      const oldPassword = b.get("old") || "";
+      const newPassword = b.get("new") || "";
+
+      if (newPassword.length < 6) {
+        return sendHtml(
+          res,
+          400,
+          "خطا",
+          `<div class="card error">
+             رمز جدید حداقل ۶ کاراکتر باشد.
+           </div>`,
+          user
+        );
+      }
+
+      const valid = await pool.query(
+        `SELECT id
+         FROM users
+         WHERE id=$1 AND password=$2`,
+        [user.id,hashPassword(oldPassword)]
+      );
+
+      if (!valid.rowCount) {
+        return sendHtml(
+          res,
+          400,
+          "خطا",
+          `<div class="card error">
+             رمز فعلی اشتباه است.
+           </div>`,
+          user
+        );
+      }
+
+      await pool.query(
+        `UPDATE users
+         SET password=$1
+         WHERE id=$2`,
+        [hashPassword(newPassword),user.id]
+      );
+
+      await pool.query(
+        `DELETE FROM sessions
+         WHERE user_id=$1`,
+        [user.id]
+      );
+
+      return redirect(res,"/login",clearCookie());
+    }
+
+    /*
+     * SETTINGS
+     */
+
+    if (method === "GET" && path === "/settings") {
+      const r = await pool.query(
+        `SELECT *
+         FROM user_settings
+         WHERE user_id=$1`,
+        [user.id]
+      );
+
+      const s = r.rows[0] || {};
+
+      return sendHtml(
+        res,
+        200,
+        "تنظیمات",
+        `
+        <div class="card">
+          <form method="post" action="/settings">
+
+            <label>
+              <input
+                type="checkbox"
+                name="notifications"
+                ${s.notifications !== false ? "checked" : ""}
+              >
+              اعلان‌ها
+            </label>
+
+            <label>
+              <input
+                type="checkbox"
+                name="message_notifications"
+                ${s.message_notifications !== false ? "checked" : ""}
+              >
+              اعلان پیام
+            </label>
+
+            <label>
+              <input
+                type="checkbox"
+                name="allow_messages"
+                ${s.allow_messages !== false ? "checked" : ""}
+              >
+              اجازه پیام
+            </label>
+
+            <label>
+              <input
+                type="checkbox"
+                name="allow_mentions"
+                ${s.allow_mentions !== false ? "checked" : ""}
+              >
+              اجازه Mention
+            </label>
+
+            <label>
+              <input
+                type="checkbox"
+                name="allow_tags"
+                ${s.allow_tags !== false ? "checked" : ""}
+              >
+              اجازه Tag
+            </label>
+
+            <select name="theme">
+              <option value="light" ${s.theme === "light" ? "selected" : ""}>
+                روشن
+              </option>
+              <option value="dark" ${s.theme === "dark" ? "selected" : ""}>
+                تاریک
+              </option>
+            </select>
+
+            <button class="green full">
+              ذخیره تنظیمات
+            </button>
+          </form>
+        </div>
+        `,
+        user
+      );
+    }
+
+    if (method === "POST" && path === "/settings") {
+      const b = await readBody(req);
+
+      await pool.query(
+        `INSERT INTO user_settings(
+           user_id,
+           notifications,
+           message_notifications,
+           allow_messages,
+           allow_mentions,
+           allow_tags,
+           theme
+         )
+         VALUES($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT(user_id)
+         DO UPDATE SET
+           notifications=EXCLUDED.notifications,
+           message_notifications=EXCLUDED.message_notifications,
+           allow_messages=EXCLUDED.allow_messages,
+           allow_mentions=EXCLUDED.allow_mentions,
+           allow_tags=EXCLUDED.allow_tags,
+           theme=EXCLUDED.theme`,
+        [
+          user.id,
+          b.has("notifications"),
+          b.has("message_notifications"),
+          b.has("allow_messages"),
+          b.has("allow_mentions"),
+          b.has("allow_tags"),
+          b.get("theme") === "dark" ? "dark" : "light"
+        ]
+      );
+
+      return redirect(res,"/settings");
+    }
+
+    /*
+     * JOBS
+     */
+
+    if (method === "GET" && path === "/jobs") {
+      const q = (parsed.searchParams.get("q") || "").trim();
+      const city = (parsed.searchParams.get("city") || "").trim();
+
+      const result = await pool.query(
+        `SELECT
+           j.*,
+           u.name,
+           u.username
+         FROM jobs j
+         JOIN users u ON u.id=j.user_id
+         WHERE
+           ($1='' OR
+             j.title ILIKE $2 OR
+             j.description ILIKE $2 OR
+             j.category ILIKE $2)
+           AND
+           ($3='' OR j.city ILIKE $4)
+         ORDER BY j.created_at DESC
+         LIMIT 100`,
+        [q,`%${q}%`,city,`%${city}%`]
+      );
+
+      let content = `
+        <div class="card">
+          <h2>💼 کاریابی</h2>
+
+          <form method="get" action="/jobs">
+            <input
+              name="q"
+              value="${escapeHtml(q)}"
+              placeholder="عنوان یا دسته‌بندی"
+            >
+
+            <input
+              name="city"
+              value="${escapeHtml(city)}"
+              placeholder="شهر"
+            >
+
+            <button class="blue">
+              جستجو
+            </button>
+          </form>
+
+          <div class="actions">
+            <a class="btn green" href="/new-job">
+              ➕ ثبت آگهی
+            </a>
+          </div>
+        </div>
+      `;
+
+      for (const j of result.rows) {
+        const saved = await pool.query(
+          `SELECT 1 FROM saved_jobs
+           WHERE user_id=$1 AND job_id=$2`,
+          [user.id,j.id]
+        );
+
+        content += `
+          <div class="job">
+            <h3>${escapeHtml(j.title)}</h3>
+
+            <div>
+              👤 ${escapeHtml(j.name)}
+            </div>
+
+            <div>
+              📂 ${escapeHtml(j.category || "عمومی")}
+            </div>
+
+            <div>
+              📍 ${escapeHtml(j.city || "نامشخص")}
+            </div>
+
+            <div>
+              🏢 ${escapeHtml(j.workplace || "")}
+            </div>
+
+            <div class="success">
+              💰 ${escapeHtml(j.salary || "توافقی")}
+            </div>
+
+            <div class="text">
+              ${escapeHtml(j.description)}
+            </div>
+
+            <div class="actions">
+              <a class="btn blue" href="/job?id=${j.id}">
+                جزئیات
+              </a>
+
+              ${button(
+                `/save-job?id=${j.id}`,
+                saved.rowCount ? "🔖 حذف ذخیره" : "🔖 ذخیره",
+                "purple"
+              )}
+
+              ${
+                j.user_id === user.id
+                  ? `
+                    <a class="btn" href="/edit-job?id=${j.id}">
+                      ✏️ ویرایش
+                    </a>
+                    ${button(
+                      `/delete-job?id=${j.id}`,
+                      "🗑️ حذف",
+                      "red"
+                    )}
+                  `
+                  : ""
+              }
+            </div>
+          </div>
+        `;
+      }
+
+      if (!result.rowCount) {
+        content += `
+          <div class="card empty">
+            آگهی‌ای پیدا نشد.
+          </div>
+        `;
+      }
+
+      return sendHtml(res,200,"کاریابی",content,user);
+    }
+
+    /*
+     * NEW JOB
+     */
+
+    if (method === "GET" && path === "/new-job") {
+      return sendHtml(
+        res,
+        200,
+        "آگهی شغلی جدید",
+        `
+        <div class="card">
+          <form method="post" action="/new-job">
+
+            <input
+              name="title"
+              maxlength="200"
+              placeholder="عنوان شغل"
+              required
+            >
+
+            <input
+              name="category"
+              maxlength="100"
+              placeholder="دسته‌بندی"
+            >
+
+            <input
+              name="city"
+              maxlength="100"
+              placeholder="شهر"
+            >
+
+            <input
+              name="workplace"
+              maxlength="200"
+              placeholder="محل کار"
+            >
+
+            <input
+              name="salary"
+              maxlength="100"
+              placeholder="حقوق"
+            >
+
+            <textarea
+              name="description"
+              maxlength="10000"
+              placeholder="توضیحات و شرایط"
+              required
+            ></textarea>
+
+            <input
+              name="contact"
+              maxlength="500"
+              placeholder="راه ارتباطی"
+            >
+
+            <button class="green full">
+              انتشار آگهی
+            </button>
+
+          </form>
+        </div>
+        `,
+        user
+      );
+    }
+
+    if (method === "POST" && path === "/new-job") {
+      const b = await readBody(req);
+
+      const title = (b.get("title") || "").trim();
+      const category = (b.get("category") || "").trim();
+      const city = (b.get("city") || "").trim();
+      const workplace = (b.get("workplace") || "").trim();
+      const salary = (b.get("salary") || "").trim();
+      const description = (b.get("description") || "").trim();
+      const contact = (b.get("contact") || "").trim();
+
+      if (title && description) {
+        await pool.query(
+          `INSERT INTO jobs(
+             user_id,
+             title,
+             category,
+             city,
+             workplace,
+             salary,
+             description,
+             contact
+           )
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [
+            user.id,
+            title,
+            category,
+            city,
+            workplace,
+            salary,
+            description,
+            contact
+          ]
+        );
+      }
+
+      return redirect(res,"/jobs");
+    }
+
+    /*
+     * JOB DETAILS
+     */
+
+    if (method === "GET" && path === "/job") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      const r = await pool.query(
+        `SELECT j.*,u.name,u.username
+         FROM jobs j
+         JOIN users u ON u.id=j.user_id
+         WHERE j.id=$1`,
+        [id]
+      );
+
+      if (!r.rowCount) {
+        return sendHtml(
+          res,
+          404,
+          "آگهی",
+          `<div class="card empty">آگهی پیدا نشد.</div>`,
+          user
+        );
+      }
+
+      const j = r.rows[0];
+
+      let content = `
+        <div class="job">
+
+          <h2>${escapeHtml(j.title)}</h2>
+
+          <p>👤 ${escapeHtml(j.name)}</p>
+          <p>📂 ${escapeHtml(j.category || "عمومی")}</p>
+          <p>📍 ${escapeHtml(j.city || "نامشخص")}</p>
+          <p>🏢 ${escapeHtml(j.workplace || "")}</p>
+          <p>💰 ${escapeHtml(j.salary || "توافقی")}</p>
+
+          <div class="text">
+            ${escapeHtml(j.description)}
+          </div>
+
+          ${
+            j.contact
+              ? `<div class="notice">
+                   📞 راه ارتباطی:
+                   ${escapeHtml(j.contact)}
+                 </div>`
+              : ""
+          }
+
+          <div class="actions">
+            ${button(
+              `/save-job?id=${j.id}`,
+              "🔖 ذخیره",
+              "purple"
+            )}
+
+            ${
+              j.user_id !== user.id
+                ? `<a class="btn blue" href="/apply-job?id=${j.id}">
+                     📨 درخواست
+                   </a>`
+                : ""
+            }
+
+            <a class="btn red" href="/report?job=${j.id}">
+              🚩 گزارش
+            </a>
+          </div>
+
+        </div>
+      `;
+
+      if (j.user_id === user.id) {
+        const applications = await pool.query(
+          `SELECT
+             a.*,
+             u.name,
+             u.username
+           FROM job_applications a
+           JOIN users u ON u.id=a.applicant_id
+           WHERE a.job_id=$1
+           ORDER BY a.created_at DESC`,
+          [id]
+        );
+
+        content += `<div class="card"><h3>📨 درخواست‌ها</h3>`;
+
+        for (const a of applications.rows) {
+          content += `
+            <div class="comment">
+              <b>${escapeHtml(a.name)}</b>
+              <div class="text">
+                ${escapeHtml(a.message || "")}
+              </div>
+              <div class="muted">
+                وضعیت: ${escapeHtml(a.status)}
+              </div>
+            </div>
+          `;
+        }
+
+        content += `</div>`;
+      }
+
+      return sendHtml(res,200,"جزئیات آگهی",content,user);
+    }
+
+    /*
+     * APPLY JOB
+     */
+
+    if (method === "GET" && path === "/apply-job") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      return sendHtml(
+        res,
+        200,
+        "درخواست شغلی",
+        `
+        <div class="card">
+          <form method="post" action="/apply-job?id=${id}">
+            <textarea
+              name="message"
+              maxlength="5000"
+              placeholder="پیام برای صاحب آگهی"
+              required
+            ></textarea>
+
+            <button class="green full">
+              ارسال درخواست
+            </button>
+          </form>
+        </div>
+        `,
+        user
+      );
+    }
+
+    if (method === "POST" && path === "/apply-job") {
+      const id = validId(parsed.searchParams.get("id"));
+      const b = await readBody(req);
+      const message = (b.get("message") || "").trim();
+
+      if (id && message) {
+        const job = await pool.query(
+          `SELECT user_id FROM jobs WHERE id=$1`,
+          [id]
+        );
+
+        if (job.rowCount) {
+          await pool.query(
+            `INSERT INTO job_applications(
+               job_id,applicant_id,message
+             )
+             VALUES($1,$2,$3)
+             ON CONFLICT(job_id,applicant_id)
+             DO UPDATE SET
+               message=EXCLUDED.message,
+               status='pending'`,
+            [id,user.id,message]
+          );
+
+          await notify(
+            job.rows[0].user_id,
+            user.id,
+            "job_application"
+          );
+        }
+      }
+
+      return redirect(res,`/job?id=${id}`);
+    }
+
+    if (method === "POST" && path === "/save-job") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      const exists = await pool.query(
+        `SELECT 1 FROM saved_jobs
+         WHERE user_id=$1 AND job_id=$2`,
+        [user.id,id]
+      );
+
+      if (exists.rowCount) {
+        await pool.query(
+          `DELETE FROM saved_jobs
+           WHERE user_id=$1 AND job_id=$2`,
+          [user.id,id]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO saved_jobs(user_id,job_id)
+           VALUES($1,$2)
+           ON CONFLICT DO NOTHING`,
+          [user.id,id]
+        );
+      }
+
+      return redirect(res,req.headers.referer || "/jobs");
+    }
+
+    /*
+     * EDIT / DELETE JOB
+     */
+
+    if (method === "GET" && path === "/edit-job") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      const r = await pool.query(
+        `SELECT * FROM jobs
+         WHERE id=$1 AND user_id=$2`,
+        [id,user.id]
+      );
+
+      if (!r.rowCount) return redirect(res,"/jobs");
+
+      const j = r.rows[0];
+
+      return sendHtml(
+        res,
+        200,
+        "ویرایش آگهی",
+        `
+        <div class="card">
+          <form method="post" action="/edit-job?id=${id}">
+
+            <input name="title"
+              value="${escapeHtml(j.title)}"
+              required>
+
+            <input name="category"
+              value="${escapeHtml(j.category || "")}">
+
+            <input name="city"
+              value="${escapeHtml(j.city || "")}">
+
+            <input name="workplace"
+              value="${escapeHtml(j.workplace || "")}">
+
+            <input name="salary"
+              value="${escapeHtml(j.salary || "")}">
+
+            <textarea name="description"
+              required>${escapeHtml(j.description)}</textarea>
+
+            <input name="contact"
+              value="${escapeHtml(j.contact || "")}">
+
+            <button class="green">
+              ذخیره
+            </button>
+          </form>
+        </div>
+        `,
+        user
+      );
+    }
+
+    if (method === "POST" && path === "/edit-job") {
+      const id = validId(parsed.searchParams.get("id"));
+      const b = await readBody(req);
+
+      await pool.query(
+        `UPDATE jobs
+         SET title=$1,
+             category=$2,
+             city=$3,
+             workplace=$4,
+             salary=$5,
+             description=$6,
+             contact=$7,
+             updated_at=NOW()
+         WHERE id=$8 AND user_id=$9`,
+        [
+          (b.get("title") || "").trim(),
+          (b.get("category") || "").trim(),
+          (b.get("city") || "").trim(),
+          (b.get("workplace") || "").trim(),
+          (b.get("salary") || "").trim(),
+          (b.get("description") || "").trim(),
+          (b.get("contact") || "").trim(),
+          id,
+          user.id
+        ]
+      );
+
+      return redirect(res,"/jobs");
+    }
+
+    if (method === "POST" && path === "/delete-job") {
+      const id = validId(parsed.searchParams.get("id"));
+
+      await pool.query(
+        `DELETE FROM jobs
+         WHERE id=$1 AND user_id=$2`,
+        [id,user.id]
+      );
+
+      return redirect(res,"/jobs");
+    }
+
+    /*
+     * CALLS
+     * این بخش signaling را برای WebRTC آماده می‌کند.
+     * خود تماس صوتی/تصویری به WebRTC در سمت Client نیاز دارد.
+     */
+
+    if (method === "POST" && path === "/call/start") {
+      const receiverId = validId(
+        parsed.searchParams.get("user")
+      );
+
+      const type =
+        parsed.searchParams.get("type") === "video"
+          ? "video"
+          : "audio";
+
+      if (!receiverId || receiverId === user.id) {
+        return sendJson(res,400,{
+          ok:false,
+          error:"invalid_receiver"
+        });
+      }
+
+      const r = await pool.query(
+        `INSERT INTO active_calls(
+           caller_id,
+           receiver_id,
+           call_type
+         )
+         VALUES($1,$2,$3)
+         RETURNING id`,
+        [user.id,receiverId,type]
+      );
+
+      await notify(
+        receiverId,
+        user.id,
+        "call"
+      );
+
+      return sendJson(res,200,{
+        ok:true,
+        callId:r.rows[0].id,
+        type
+      });
+    }
+
+    if (method === "POST" && path === "/call/end") {
+      const id = validId(
+        parsed.searchParams.get("id")
+      );
+
+      await pool.query(
+        `UPDATE active_calls
+         SET status='ended',
+             ended_at=NOW()
+         WHERE id=$1
+           AND (caller_id=$2 OR receiver_id=$2)`,
+        [id,user.id]
+      );
+
+      return sendJson(res,200,{ok:true});
+    }
+
+    /*
+     * AUDIO
+     * فقط فایل/منبع مجاز.
+     */
+
+    if (method === "GET" && path === "/audio") {
+      const r = await pool.query(
+        `SELECT a.*,u.name
+         FROM audio a
+         JOIN users u ON u.id=a.user_id
+         WHERE a.licensed=true
+         ORDER BY a.created_at DESC
+         LIMIT 50`
+      );
+
+      let content = `
+        <div class="card">
+          <h2>🎵 صداهای مجاز</h2>
+          <p class="muted">
+            فقط فایل‌ها و منابعی که اجازه استفاده از آن‌ها وجود دارد.
+          </p>
+        </div>
+      `;
+
+      for (const a of r.rows) {
+        content += `
+          <div class="card">
+            <b>${escapeHtml(a.title)}</b>
+            <div class="muted">
+              ${escapeHtml(a.name)}
+            </div>
+
+            <audio controls style="width:100%;margin-top:10px">
+              <source src="${escapeHtml(a.url)}">
+            </audio>
+          </div>
+        `;
+      }
+
+      return sendHtml(res,200,"صدا",content,user);
+    }
+
+    /*
+     * SEARCH HISTORY
+     */
+
+    if (method === "GET" && path === "/search-history") {
+      const r = await pool.query(
+        `SELECT *
+         FROM search_history
+         WHERE user_id=$1
+         ORDER BY created_at DESC
+         LIMIT 50`,
+        [user.id]
+      );
+
+      let content = `
+        <div class="card">
+          <h2>🕘 جستجوهای اخیر</h2>
+
+          ${button(
+            "/search-history-clear",
+            "🗑️ پاک کردن",
+            "red"
+          )}
+        </div>
+      `;
+
+      for (const x of r.rows) {
+        content += `
+          <div class="card">
+            🔎 ${escapeHtml(x.query)}
+          </div>
+        `;
+      }
+
+      return sendHtml(res,200,"تاریخچه جستجو",content,user);
+    }
+
+    if (method === "POST" && path === "/search-history-clear") {
+      await pool.query(
+        `DELETE FROM search_history
+         WHERE user_id=$1`,
+        [user.id]
+      );
+
+      return redirect(res,"/search-history");
+    }
+
+    /*
+     * ACCOUNT DELETE
+     */
+
+    if (method === "POST" && path === "/delete-account") {
+      await pool.query(
+        `DELETE FROM users
+         WHERE id=$1`,
+        [user.id]
+      );
+
+      return redirect(res,"/login",clearCookie());
+    }
+
+    /*
+     * PUBLIC PAGES
+     */
+
+    if (method === "GET" && path === "/about") {
+      return sendHtml(
+        res,
+        200,
+        "درباره برنامه",
+        `
+        <div class="card">
+          <h2>درباره برنامه</h2>
+          <p>
+            یک پلتفرم اجتماعی فارسی با پست، پیام،
+            دنبال‌کردن، استوری، Reel، کاریابی و امکانات
+            تعاملی.
+          </p>
+        </div>
+        `,
+        user
+      );
+    }
+
+    if (method === "GET" && path === "/rules") {
+      return sendHtml(
+        res,
+        200,
+        "قوانین",
+        `
+        <div class="card">
+          <h2>قوانین استفاده</h2>
+          <p>
+            از انتشار محتوای غیرقانونی، آزاردهنده،
+            فریبکارانه یا محتوایی که حقوق دیگران را
+            نقض می‌کند خودداری کنید.
+          </p>
+        </div>
+        `,
+        user
+      );
+    }
+
+    if (method === "GET" && path === "/privacy") {
+      return sendHtml(
+        res,
+        200,
+        "حریم خصوصی",
+        `
+        <div class="card">
+          <h2>حریم خصوصی</h2>
+          <p>
+            اطلاعات حساب و تعاملات کاربران باید فقط
+            در محدوده مجاز سیستم قابل دسترسی باشد.
+          </p>
+        </div>
+        `,
+        user
+      );
+    }
+
+    /*
+     * 404
+     */
+
+    return sendHtml(
+      res,
+      404,
+      "صفحه پیدا نشد",
+      `
+      <div class="card empty">
+        <h2>404</h2>
+        <p>صفحه موردنظر پیدا نشد.</p>
+        <a class="btn" href="/">بازگشت به خانه</a>
+      </div>
+      `,
+      user
+    );
+
+  } catch (error) {
+    console.error("REQUEST ERROR:", error);
+
+    if (res.headersSent) {
+      try {
+        res.end();
+      } catch {}
+      return;
+    }
+
+    try {
+      await sendHtml(
+        res,
+        500,
+        "خطای سرور",
+        `
+        <div class="card">
+          <div class="error">
+            خطایی در اجرای درخواست رخ داد.
+          </div>
+
+          <p>
+            اطلاعات فنی خطا به کاربر نمایش داده نمی‌شود.
+          </p>
+
+          <a class="btn" href="/">
+            بازگشت به خانه
+          </a>
+        </div>
+        `,
+        user
+      );
+    } catch (secondError) {
+      console.error(
+        "ERROR PAGE FAILED:",
+        secondError
+      );
+
+      if (!res.headersSent) {
+        res.writeHead(500,{
+          "Content-Type":"text/plain; charset=utf-8"
+        });
+      }
+
+      res.end("Internal Server Error");
+    }
+  }
+}
+
+async function start() {
+  try {
+    await pool.query("SELECT NOW()");
+
+    console.log("Database connection successful.");
+
+    await initDatabase();
+
+    const server = http.createServer(app);
+
+    server.on(
+      "clientError",
+      (error,socket) => {
+        console.error(
+          "CLIENT ERROR:",
+          error.message
+        );
+
+        try {
+          socket.end(
+            "HTTP/1.1 400 Bad Request\r\n\r\n"
+          );
+        } catch {}
+      }
+    );
+
+    server.listen(
+      PORT,
+      "0.0.0.0",
+      () => {
+        console.log(
+          `Server running on port ${PORT}`
+        );
+      }
+    );
+
+  } catch (error) {
+    console.error(
+      "STARTUP ERROR:",
+      error
+    );
+
+    process.exit(1);
+  }
+}
+
+process.on("unhandledRejection", error => {
+  console.error(
+    "UNHANDLED REJECTION:",
+    error
+  );
+});
+
+process.on("uncaughtException", error => {
+  console.error(
+    "UNCAUGHT EXCEPTION:",
+    error
+  );
+});
+
+start();
