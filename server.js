@@ -586,13 +586,6 @@ function toggleTheme() {
 if (localStorage.getItem("dark") === "true") {
   document.body.classList.add("dark");
 }
-
-</script>
-
-</body>
-</html>`;
-}
-
 async function ensureColumn(table, column, definition) {
   await pool.query(
     `ALTER TABLE ${table}
@@ -609,9 +602,9 @@ async function createTables() {
       email TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL
     )
-  );
+  `);
 
-  await pool.query(
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions (
       session_id TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL
