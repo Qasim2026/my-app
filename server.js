@@ -1,6 +1,9 @@
 const http = require("http");
 const crypto = require("crypto");
+const util = require("util");
 const { Pool } = require("pg");
+
+const scryptAsync = util.promisify(crypto.scrypt);
 
 const PORT = Number(process.env.PORT || 10000);
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -16,12 +19,113 @@ const pool = new Pool({
   connectionTimeoutMillis: 10000
 });
 
+/* =========================================================
+   PASSWORD
+========================================================= */
+
 function hashPassword(password) {
   return crypto
     .createHash("sha256")
     .update(String(password))
     .digest("hex");
 }
+
+async function hashPasswordScrypt(password) {
+  const salt = crypto.randomBytes(16).toString("hex");
+
+  const derivedKey = await scryptAsync(
+    String(password),
+    salt,
+    64
+  );
+
+  return `scrypt$${salt}$${Buffer.from(derivedKey).toString("hex")}`;
+}
+
+async function verifyPassword(password, stored) {
+  const value = String(stored || "");
+  const plain = String(password || "");
+
+  /* SHA-256 used by this/current version */
+  if (/^[a-f0-9]{64}$/i.test(value)) {
+    const hash = hashPassword(plain);
+
+    return crypto.timingSafeEqual(
+      Buffer.from(hash, "hex"),
+      Buffer.from(value, "hex")
+    );
+  }
+
+  /* New scrypt format */
+  if (value.startsWith("scrypt$")) {
+    const parts = value.split("$");
+
+    if (parts.length !== 3) {
+      return false;
+    }
+
+    const salt = parts[1];
+    const expectedHex = parts[2];
+
+    try {
+      const derivedKey = await scryptAsync(
+        plain,
+        salt,
+        64
+      );
+
+      const actual = Buffer.from(derivedKey);
+      const expected = Buffer.from(expectedHex, "hex");
+
+      if (actual.length !== expected.length) {
+        return false;
+      }
+
+      return crypto.timingSafeEqual(
+        actual,
+        expected
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /* Older common salt:hash scrypt format */
+  if (value.includes(":")) {
+    const parts = value.split(":");
+
+    if (parts.length === 2) {
+      const salt = parts[0];
+      const expectedHex = parts[1];
+
+      try {
+        const derivedKey = await scryptAsync(
+          plain,
+          salt,
+          64
+        );
+
+        const actual = Buffer.from(derivedKey);
+        const expected = Buffer.from(expectedHex, "hex");
+
+        if (actual.length === expected.length) {
+          return crypto.timingSafeEqual(
+            actual,
+            expected
+          );
+        }
+      } catch {
+        return false;
+      }
+    }
+  }
+
+  return false;
+}
+
+/* =========================================================
+   HELPERS
+========================================================= */
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -39,7 +143,9 @@ function parseCookies(req) {
   header.split(";").forEach(part => {
     const index = part.indexOf("=");
 
-    if (index < 0) return;
+    if (index < 0) {
+      return;
+    }
 
     const key = part.slice(0, index).trim();
     const value = part.slice(index + 1).trim();
@@ -57,18 +163,29 @@ function parseCookies(req) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
+    let finished = false;
 
     req.on("data", chunk => {
+      if (finished) {
+        return;
+      }
+
       body += chunk;
 
       if (body.length > 1024 * 1024) {
+        finished = true;
         reject(new Error("Request body too large"));
-        req.destroy();
+
+        try {
+          req.destroy();
+        } catch {}
       }
     });
 
     req.on("end", () => {
-      resolve(new URLSearchParams(body));
+      if (!finished) {
+        resolve(new URLSearchParams(body));
+      }
     });
 
     req.on("error", reject);
@@ -88,14 +205,34 @@ function redirect(res, location, cookie) {
   res.end();
 }
 
-function sendHtml(res, status, title, content, user = null) {
+function sendHtml(
+  res,
+  status,
+  title,
+  content,
+  user = null
+) {
+  if (res.headersSent) {
+    return;
+  }
+
   res.writeHead(status, {
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-store"
   });
 
-  res.end(page(title, content, user));
+  res.end(
+    page(
+      title,
+      content,
+      user
+    )
+  );
 }
+
+/* =========================================================
+   PAGE
+========================================================= */
 
 function page(title, content, user) {
   const nav = user
@@ -133,6 +270,7 @@ function page(title, content, user) {
     ? `
       <div class="top-actions">
         <a href="/jobs">💼 کاریابی</a>
+        <a href="/saved">🔖 ذخیره‌ها</a>
         <a href="/settings">⚙️ تنظیمات</a>
         <a href="/notifications">🔔 اعلان‌ها</a>
         <a href="/logout">🚪 خروج</a>
@@ -140,8 +278,7 @@ function page(title, content, user) {
     `
     : "";
 
-  return `
-<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="UTF-8">
@@ -154,6 +291,7 @@ function page(title, content, user) {
   <title>${escapeHtml(title)}</title>
 
   <style>
+
     * {
       box-sizing: border-box;
     }
@@ -164,9 +302,11 @@ function page(title, content, user) {
         Tahoma,
         Arial,
         sans-serif;
+
       background: #f3f5f7;
       color: #222;
-      padding-bottom: 80px;
+
+      padding-bottom: 85px;
     }
 
     a {
@@ -175,7 +315,7 @@ function page(title, content, user) {
     }
 
     header {
-      background: #ffffff;
+      background: #fff;
       border-bottom: 1px solid #ddd;
       position: sticky;
       top: 0;
@@ -189,7 +329,7 @@ function page(title, content, user) {
     }
 
     .brand {
-      font-size: 22px;
+      font-size: 23px;
       font-weight: bold;
       margin-bottom: 10px;
     }
@@ -197,7 +337,7 @@ function page(title, content, user) {
     .top-actions {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 7px;
     }
 
     .top-actions a {
@@ -239,6 +379,14 @@ function page(title, content, user) {
       justify-content: center;
       font-weight: bold;
       font-size: 20px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
 
     .username {
@@ -270,6 +418,7 @@ function page(title, content, user) {
 
     .stats {
       display: flex;
+      flex-wrap: wrap;
       gap: 18px;
       color: #666;
       font-size: 13px;
@@ -290,6 +439,7 @@ function page(title, content, user) {
       cursor: pointer;
       background: #e9ecef;
       font-size: 14px;
+      font-family: inherit;
     }
 
     button.full {
@@ -341,18 +491,10 @@ function page(title, content, user) {
       color: #777;
     }
 
-    .comment {
-      margin-bottom: 10px;
-    }
-
-    .comment-name {
-      font-weight: bold;
-      margin-bottom: 6px;
-    }
-
     .comment-text {
       white-space: pre-wrap;
       line-height: 1.8;
+      margin-top: 10px;
     }
 
     .job-title {
@@ -405,7 +547,15 @@ function page(title, content, user) {
       margin-bottom: 2px;
     }
 
+    .notice {
+      padding: 12px;
+      border-radius: 10px;
+      background: #f7f7f7;
+      margin-top: 10px;
+    }
+
     @media (max-width: 600px) {
+
       main {
         margin-top: 12px;
       }
@@ -423,6 +573,7 @@ function page(title, content, user) {
         padding: 7px 8px;
       }
     }
+
   </style>
 </head>
 
@@ -446,27 +597,16 @@ function page(title, content, user) {
 
 ${nav}
 
-<script>
-  function toggleTheme() {
-    const dark =
-      document.body.dataset.theme === "dark";
-
-    if (dark) {
-      document.body.dataset.theme = "";
-      document.body.style.background = "#f3f5f7";
-      document.body.style.color = "#222";
-    } else {
-      document.body.dataset.theme = "dark";
-      document.body.style.background = "#151515";
-      document.body.style.color = "#eee";
-    }
-  }
-</script>
-
 </body>
-</html>
-  `;
-}async function createTables() {
+</html>`;
+}
+
+/* =========================================================
+   DATABASE
+========================================================= */
+
+async function createTables() {
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -639,7 +779,12 @@ ${nav}
   );
 }
 
+/* =========================================================
+   SESSION
+========================================================= */
+
 async function createSession(userId) {
+
   const sessionId =
     crypto.randomBytes(32).toString("hex");
 
@@ -661,6 +806,7 @@ async function createSession(userId) {
 }
 
 async function getSession(req) {
+
   const cookies = parseCookies(req);
   const sessionId = cookies.sessionId;
 
@@ -687,6 +833,27 @@ async function getSession(req) {
   return result.rows[0] || null;
 }
 
+async function destroySession(req) {
+
+  const cookies = parseCookies(req);
+
+  if (!cookies.sessionId) {
+    return;
+  }
+
+  await pool.query(
+    `
+      DELETE FROM sessions
+      WHERE session_id=$1
+    `,
+    [cookies.sessionId]
+  );
+}
+
+/* =========================================================
+   NOTIFICATIONS
+========================================================= */
+
 async function notify(
   userId,
   actorId,
@@ -694,6 +861,7 @@ async function notify(
   postId,
   message
 ) {
+
   if (
     !userId ||
     userId === actorId
@@ -722,9 +890,15 @@ async function notify(
   );
 }
 
+/* =========================================================
+   SERVER
+========================================================= */
+
 const server = http.createServer(
   async (req, res) => {
+
     try {
+
       const url = new URL(
         req.url,
         "http://localhost"
@@ -735,20 +909,15 @@ const server = http.createServer(
       const user =
         await getSession(req);
 
-      if (
-        path !== "/login" &&
-        path !== "/register" &&
-        path !== "/health" &&
-        !user
-      ) {
-        redirect(res, "/login");
-        return;
-      }
+      /* =====================================================
+         HEALTH
+      ===================================================== */
 
       if (
         req.method === "GET" &&
         path === "/health"
       ) {
+
         res.writeHead(200, {
           "Content-Type":
             "application/json; charset=utf-8"
@@ -764,10 +933,15 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         LOGIN
+      ===================================================== */
+
       if (
         req.method === "GET" &&
         path === "/login"
       ) {
+
         if (user) {
           redirect(res, "/");
           return;
@@ -780,7 +954,9 @@ const server = http.createServer(
           `
             <div class="card">
 
-              <h2>ورود به MySocial</h2>
+              <h2>
+                🔐 ورود به MySocial
+              </h2>
 
               <form
                 method="POST"
@@ -790,6 +966,7 @@ const server = http.createServer(
                 <input
                   type="email"
                   name="email"
+                  maxlength="255"
                   placeholder="ایمیل"
                   required
                 >
@@ -802,7 +979,7 @@ const server = http.createServer(
                 >
 
                 <button class="full">
-                  🔐 ورود
+                  ورود
                 </button>
 
               </form>
@@ -825,6 +1002,7 @@ const server = http.createServer(
         req.method === "POST" &&
         path === "/login"
       ) {
+
         const data =
           await readBody(req);
 
@@ -836,34 +1014,23 @@ const server = http.createServer(
         const password =
           data.get("password") || "";
 
-        const result =
-          await pool.query(
-            `
-              SELECT id
-              FROM users
-              WHERE email=$1
-              AND password=$2
-            `,
-            [
-              email,
-              hashPassword(password)
-            ]
-          );
+        if (!email || !password) {
 
-        if (!result.rows.length) {
           sendHtml(
             res,
-            401,
+            400,
             "خطا",
             `
               <div class="card">
+
                 <p class="error">
-                  ایمیل یا رمز عبور اشتباه است.
+                  ایمیل و رمز عبور را وارد کنید.
                 </p>
 
                 <a href="/login">
-                  بازگشت به ورود
+                  بازگشت
                 </a>
+
               </div>
             `
           );
@@ -871,9 +1038,119 @@ const server = http.createServer(
           return;
         }
 
+        const result =
+          await pool.query(
+            `
+              SELECT
+                id,
+                password
+              FROM users
+              WHERE email=$1
+              LIMIT 1
+            `,
+            [email]
+          );
+
+        if (!result.rows.length) {
+
+          sendHtml(
+            res,
+            401,
+            "خطا",
+            `
+              <div class="card">
+
+                <p class="error">
+                  ایمیل یا رمز عبور اشتباه است.
+                </p>
+
+                <a href="/login">
+                  تلاش دوباره
+                </a>
+
+              </div>
+            `
+          );
+
+          return;
+        }
+
+        const account =
+          result.rows[0];
+
+        const valid =
+          await verifyPassword(
+            password,
+            account.password
+          );
+
+        if (!valid) {
+
+          sendHtml(
+            res,
+            401,
+            "خطا",
+            `
+              <div class="card">
+
+                <p class="error">
+                  ایمیل یا رمز عبور اشتباه است.
+                </p>
+
+                <a href="/login">
+                  تلاش دوباره
+                </a>
+
+              </div>
+            `
+          );
+
+          return;
+        }
+
+        /*
+         * پس از ورود موفق، رمز را به scrypt
+         * تبدیل می‌کنیم تا حساب‌های قدیمی
+         * نیز به مرور به روش جدید منتقل شوند.
+         */
+
+        if (
+          /^[a-f0-9]{64}$/i.test(
+            account.password
+          )
+        ) {
+
+          try {
+
+            const newHash =
+              await hashPasswordScrypt(
+                password
+              );
+
+            await pool.query(
+              `
+                UPDATE users
+                SET password=$1
+                WHERE id=$2
+              `,
+              [
+                newHash,
+                account.id
+              ]
+            );
+
+          } catch (migrationError) {
+
+            console.error(
+              "PASSWORD MIGRATION ERROR:",
+              migrationError
+            );
+          }
+        }
+
         const sessionId =
           await createSession(
-            result.rows[0].id
+            account.id
           );
 
         redirect(
@@ -887,10 +1164,18 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         REGISTER
+      ===================================================== */
+
       if (
         req.method === "GET" &&
-        path === "/register"
+        (
+          path === "/register" ||
+          path === "/signup"
+        )
       ) {
+
         if (user) {
           redirect(res, "/");
           return;
@@ -903,7 +1188,9 @@ const server = http.createServer(
           `
             <div class="card">
 
-              <h2>ساخت حساب</h2>
+              <h2>
+                📝 ساخت حساب
+              </h2>
 
               <form
                 method="POST"
@@ -918,23 +1205,23 @@ const server = http.createServer(
                 >
 
                 <input
-                  type="email"
                   name="email"
+                  type="email"
                   maxlength="255"
                   placeholder="ایمیل"
                   required
                 >
 
                 <input
-                  type="password"
                   name="password"
+                  type="password"
                   minlength="6"
-                  placeholder="رمز عبور"
+                  placeholder="رمز عبور، حداقل ۶ کاراکتر"
                   required
                 >
 
                 <button class="full">
-                  📝 ثبت‌نام
+                  ثبت‌نام
                 </button>
 
               </form>
@@ -955,8 +1242,12 @@ const server = http.createServer(
 
       if (
         req.method === "POST" &&
-        path === "/register"
+        (
+          path === "/register" ||
+          path === "/signup"
+        )
       ) {
+
         const data =
           await readBody(req);
 
@@ -977,15 +1268,22 @@ const server = http.createServer(
           !email ||
           password.length < 6
         ) {
+
           sendHtml(
             res,
             400,
             "خطا",
             `
               <div class="card">
+
                 <p class="error">
-                  نام، ایمیل و رمز عبور معتبر لازم است.
+                  نام، ایمیل و رمز حداقل ۶ کاراکتری لازم است.
                 </p>
+
+                <a href="/register">
+                  بازگشت
+                </a>
+
               </div>
             `
           );
@@ -994,6 +1292,12 @@ const server = http.createServer(
         }
 
         try {
+
+          const passwordHash =
+            await hashPasswordScrypt(
+              password
+            );
+
           const result =
             await pool.query(
               `
@@ -1008,7 +1312,7 @@ const server = http.createServer(
               [
                 name,
                 email,
-                hashPassword(password)
+                passwordHash
               ]
             );
 
@@ -1026,15 +1330,18 @@ const server = http.createServer(
           );
 
         } catch (error) {
+
           if (
             error.code === "23505"
           ) {
+
             sendHtml(
               res,
               409,
               "خطا",
               `
                 <div class="card">
+
                   <p class="error">
                     این ایمیل قبلاً ثبت شده است.
                   </p>
@@ -1042,31 +1349,31 @@ const server = http.createServer(
                   <a href="/login">
                     ورود به حساب
                   </a>
+
                 </div>
               `
             );
+
           } else {
+
             throw error;
+
           }
         }
 
         return;
-      }if (
+      }
+
+      /* =====================================================
+         LOGOUT
+      ===================================================== */
+
+      if (
         req.method === "GET" &&
         path === "/logout"
       ) {
-        const cookies =
-          parseCookies(req);
 
-        if (cookies.sessionId) {
-          await pool.query(
-            `
-              DELETE FROM sessions
-              WHERE session_id=$1
-            `,
-            [cookies.sessionId]
-          );
-        }
+        await destroySession(req);
 
         redirect(
           res,
@@ -1077,70 +1384,93 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         AUTH CHECK
+      ===================================================== */
+
+      if (!user) {
+
+        redirect(
+          res,
+          "/login"
+        );
+
+        return;
+      }
+
+      /* =====================================================
+         HOME
+      ===================================================== */
+
       if (
         req.method === "GET" &&
         path === "/"
       ) {
+
         const posts =
-          await pool.query(`
-            SELECT
-              p.id,
-              p.user_id,
-              p.content,
-              p.image_url,
-              p.created_at,
-              u.name,
-              u.email,
+          await pool.query(
+            `
+              SELECT
+                p.id,
+                p.user_id,
+                p.content,
+                p.image_url,
+                p.created_at,
+                u.name,
+                u.email,
 
-              (
-                SELECT COUNT(*)
-                FROM likes l
-                WHERE l.post_id=p.id
-              ) AS like_count,
-
-              (
-                SELECT COUNT(*)
-                FROM comments c
-                WHERE c.post_id=p.id
-              ) AS comment_count,
-
-              EXISTS(
-                SELECT 1
-                FROM likes ml
-                WHERE ml.post_id=p.id
-                AND ml.user_id=$1
-              ) AS liked,
-
-              EXISTS(
-                SELECT 1
-                FROM bookmarks mb
-                WHERE mb.post_id=p.id
-                AND mb.user_id=$1
-              ) AS bookmarked
-
-            FROM posts p
-
-            JOIN users u
-              ON u.id=p.user_id
-
-            WHERE NOT EXISTS(
-              SELECT 1
-              FROM blocked_users b
-              WHERE
                 (
-                  b.blocker_id=$1
-                  AND b.blocked_id=p.user_id
-                )
-                OR
-                (
-                  b.blocker_id=p.user_id
-                  AND b.blocked_id=$1
-                )
-            )
+                  SELECT COUNT(*)
+                  FROM likes l
+                  WHERE l.post_id=p.id
+                ) AS like_count,
 
-            ORDER BY p.created_at DESC
-            LIMIT 100
-          `, [user.id]);
+                (
+                  SELECT COUNT(*)
+                  FROM comments c
+                  WHERE c.post_id=p.id
+                ) AS comment_count,
+
+                EXISTS(
+                  SELECT 1
+                  FROM likes ml
+                  WHERE ml.post_id=p.id
+                  AND ml.user_id=$1
+                ) AS liked,
+
+                EXISTS(
+                  SELECT 1
+                  FROM bookmarks mb
+                  WHERE mb.post_id=p.id
+                  AND mb.user_id=$1
+                ) AS bookmarked
+
+              FROM posts p
+
+              JOIN users u
+                ON u.id=p.user_id
+
+              WHERE NOT EXISTS(
+                SELECT 1
+                FROM blocked_users b
+                WHERE
+                  (
+                    b.blocker_id=$1
+                    AND b.blocked_id=p.user_id
+                  )
+                  OR
+                  (
+                    b.blocker_id=p.user_id
+                    AND b.blocked_id=$1
+                  )
+              )
+
+              ORDER BY p.created_at DESC
+
+              LIMIT 100
+            `,
+            [user.id]
+          );
 
         let html = `
           <div class="card">
@@ -1167,19 +1497,29 @@ const server = http.createServer(
                 </button>
               </a>
 
+              <a href="/saved">
+                <button>
+                  🔖 ذخیره‌ها
+                </button>
+              </a>
+
             </div>
 
           </div>
         `;
 
         if (!posts.rows.length) {
+
           html += `
             <div class="card empty">
               هنوز پستی برای نمایش وجود ندارد.
             </div>
           `;
+
         } else {
+
           for (const p of posts.rows) {
+
             html += `
               <article class="card">
 
@@ -1194,6 +1534,7 @@ const server = http.createServer(
                   </a>
 
                   <div>
+
                     <a href="/profile?id=${p.user_id}">
                       <div class="username">
                         ${escapeHtml(p.name)}
@@ -1209,6 +1550,7 @@ const server = http.createServer(
                         p.created_at
                       ).toLocaleString("fa-IR")}
                     </div>
+
                   </div>
 
                 </div>
@@ -1232,6 +1574,7 @@ const server = http.createServer(
                 }
 
                 <div class="stats">
+
                   <span>
                     ❤️ ${p.like_count}
                   </span>
@@ -1239,6 +1582,7 @@ const server = http.createServer(
                   <span>
                     💬 ${p.comment_count}
                   </span>
+
                 </div>
 
                 <div class="actions">
@@ -1275,6 +1619,18 @@ const server = http.createServer(
                     </button>
                   </a>
 
+                  ${
+                    p.user_id === user.id
+                      ? `
+                        <a href="/delete-post?id=${p.id}">
+                          <button class="danger">
+                            🗑️ حذف
+                          </button>
+                        </a>
+                      `
+                      : ""
+                  }
+
                 </div>
 
               </article>
@@ -1293,10 +1649,15 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         NEW POST
+      ===================================================== */
+
       if (
         req.method === "GET" &&
         path === "/new-post"
       ) {
+
         sendHtml(
           res,
           200,
@@ -1323,7 +1684,7 @@ const server = http.createServer(
                 <input
                   name="image_url"
                   maxlength="2000"
-                  placeholder="لینک تصویر (اختیاری)"
+                  placeholder="لینک تصویر، اختیاری"
                 >
 
                 <button class="full">
@@ -1344,6 +1705,7 @@ const server = http.createServer(
         req.method === "POST" &&
         path === "/new-post"
       ) {
+
         const data =
           await readBody(req);
 
@@ -1356,6 +1718,7 @@ const server = http.createServer(
             .trim();
 
         if (!content) {
+
           sendHtml(
             res,
             400,
@@ -1399,17 +1762,202 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         LIKE
+      ===================================================== */
+
+      if (
+        req.method === "GET" &&
+        path === "/like"
+      ) {
+
+        const postId =
+          Number(
+            url.searchParams.get("post")
+          );
+
+        if (Number.isInteger(postId)) {
+
+          const x =
+            await pool.query(
+              `
+                SELECT
+                  p.user_id,
+
+                  EXISTS(
+                    SELECT 1
+                    FROM likes
+                    WHERE post_id=$1
+                    AND user_id=$2
+                  ) AS liked
+
+                FROM posts p
+
+                WHERE p.id=$1
+              `,
+              [
+                postId,
+                user.id
+              ]
+            );
+
+          if (x.rows.length) {
+
+            if (x.rows[0].liked) {
+
+              await pool.query(
+                `
+                  DELETE FROM likes
+                  WHERE post_id=$1
+                  AND user_id=$2
+                `,
+                [
+                  postId,
+                  user.id
+                ]
+              );
+
+            } else {
+
+              await pool.query(
+                `
+                  INSERT INTO likes(
+                    post_id,
+                    user_id
+                  )
+                  VALUES($1,$2)
+                  ON CONFLICT DO NOTHING
+                `,
+                [
+                  postId,
+                  user.id
+                ]
+              );
+
+              await notify(
+                x.rows[0].user_id,
+                user.id,
+                "like",
+                postId,
+                `${user.name} پست شما را پسندید.`
+              );
+            }
+          }
+        }
+
+        redirect(
+          res,
+          "/"
+        );
+
+        return;
+      }
+
+      /* =====================================================
+         BOOKMARK
+      ===================================================== */
+
+      if (
+        req.method === "GET" &&
+        path === "/bookmark"
+      ) {
+
+        const postId =
+          Number(
+            url.searchParams.get("post")
+          );
+
+        if (Number.isInteger(postId)) {
+
+          const post =
+            await pool.query(
+              `
+                SELECT id
+                FROM posts
+                WHERE id=$1
+              `,
+              [postId]
+            );
+
+          if (post.rows.length) {
+
+            const existing =
+              await pool.query(
+                `
+                  SELECT id
+                  FROM bookmarks
+                  WHERE post_id=$1
+                  AND user_id=$2
+                `,
+                [
+                  postId,
+                  user.id
+                ]
+              );
+
+            if (existing.rows.length) {
+
+              await pool.query(
+                `
+                  DELETE FROM bookmarks
+                  WHERE post_id=$1
+                  AND user_id=$2
+                `,
+                [
+                  postId,
+                  user.id
+                ]
+              );
+
+            } else {
+
+              await pool.query(
+                `
+                  INSERT INTO bookmarks(
+                    post_id,
+                    user_id
+                  )
+                  VALUES($1,$2)
+                  ON CONFLICT DO NOTHING
+                `,
+                [
+                  postId,
+                  user.id
+                ]
+              );
+            }
+          }
+        }
+
+        redirect(
+          res,
+          "/"
+        );
+
+        return;
+      }
+
+      /* =====================================================
+         POST DETAIL
+      ===================================================== */
+
       if (
         req.method === "GET" &&
         path === "/post"
       ) {
+
         const postId =
           Number(
             url.searchParams.get("id")
           );
 
         if (!Number.isInteger(postId)) {
-          redirect(res, "/");
+
+          redirect(
+            res,
+            "/"
+          );
+
           return;
         }
 
@@ -1430,6 +1978,12 @@ const server = http.createServer(
                   FROM likes l
                   WHERE l.post_id=p.id
                 ) AS like_count,
+
+                (
+                  SELECT COUNT(*)
+                  FROM comments c
+                  WHERE c.post_id=p.id
+                ) AS comment_count,
 
                 EXISTS(
                   SELECT 1
@@ -1459,6 +2013,7 @@ const server = http.createServer(
           );
 
         if (!result.rows.length) {
+
           sendHtml(
             res,
             404,
@@ -1484,7 +2039,7 @@ const server = http.createServer(
                 c.id,
                 c.comment,
                 c.created_at,
-                u.id user_id,
+                u.id AS user_id,
                 u.name,
                 u.email
 
@@ -1554,9 +2109,15 @@ const server = http.createServer(
             }
 
             <div class="stats">
+
               <span>
                 ❤️ ${post.like_count}
               </span>
+
+              <span>
+                💬 ${post.comment_count}
+              </span>
+
             </div>
 
             <div class="actions">
@@ -1587,691 +2148,27 @@ const server = http.createServer(
                 </button>
               </a>
 
-            </div>
-
-          </article>
-
-          <div class="card">
-
-            <h3>
-              💬 نظرات
-            </h3>
-
-            <form
-              method="POST"
-              action="/comment"
-            >
-
-              <input
-                type="hidden"
-                name="post_id"
-                value="${post.id}"
-              >
-
-              <textarea
-                name="comment"
-                maxlength="3000"
-                placeholder="نظر خود را بنویس..."
-                required
-              ></textarea>
-
-              <button class="full">
-                ارسال نظر
-              </button>
-
-            </form>
-
-          </div>
-        `;
-
-        if (!comments.rows.length) {
-          html += `
-            <div class="card empty">
-              هنوز نظری ثبت نشده است.
-            </div>
-          `;
-        } else {
-          for (const c of comments.rows) {
-            html += `
-              <div class="card">
-
-                <div class="profile-head">
-
-                  <a href="/profile?id=${c.user_id}">
-                    <div class="avatar">
-                      ${escapeHtml(
-                        c.name.charAt(0)
-                      )}
-                    </div>
-                  </a>
-
-                  <div>
-                    <a href="/profile?id=${c.user_id}">
-                      <div class="username">
-                        ${escapeHtml(c.name)}
-                      </div>
-                    </a>
-
-                    <div class="small">
-                      ${new Date(
-                        c.created_at
-                      ).toLocaleString("fa-IR")}
-                    </div>
-                  </div>
-
-                </div>
-
-                <div class="comment-text">
-                  ${escapeHtml(c.comment)}
-                </div>
-
-              </div>
-            `;
-          }
-        }
-
-        sendHtml(
-          res,
-          200,
-          "پست",
-          html,
-          user
-        );
-
-        return;
-      }if (req.method==="GET" && path==="/signup") {
-        sendHtml(res,200,"ثبت‌نام",`
-          <div class="card">
-            <form method="POST" action="/signup">
-              <input
-                name="name"
-                placeholder="نام"
-                maxlength="100"
-                required
-              >
-
-              <input
-                name="email"
-                type="email"
-                placeholder="ایمیل"
-                maxlength="200"
-                required
-              >
-
-              <input
-                name="password"
-                type="password"
-                placeholder="رمز عبور، حداقل ۶ کاراکتر"
-                minlength="6"
-                required
-              >
-
-              <button class="full">
-                ثبت‌نام
-              </button>
-            </form>
-          </div>
-
-          <a href="/">
-            بازگشت
-          </a>
-        `);
-
-        return;
-      }
-
-      if (req.method==="POST" && path==="/signup") {
-        const d=await readBody(req);
-
-        const name=(d.get("name")||"").trim();
-        const email=(d.get("email")||"")
-          .trim()
-          .toLowerCase();
-        const password=d.get("password")||"";
-
-        if(!name||!email||password.length<6){
-          sendHtml(
-            res,
-            400,
-            "خطا",
-            `<p class="error">
-              نام، ایمیل و رمز حداقل ۶ کاراکتری لازم است.
-            </p>`
-          );
-
-          return;
-        }
-
-        try{
-          await pool.query(
-            `
-              INSERT INTO users(
-                name,
-                email,
-                password
-              )
-              VALUES($1,$2,$3)
-            `,
-            [
-              name,
-              email,
-              hashPassword(password)
-            ]
-          );
-
-          sendHtml(
-            res,
-            200,
-            "ثبت‌نام موفق",
-            `
-              <div class="card">
-                <h2 class="success">
-                  ثبت‌نام موفق شد ✅
-                </h2>
-
-                <a href="/login">
-                  <button class="full">
-                    ورود
-                  </button>
-                </a>
-              </div>
-            `
-          );
-
-        }catch(e){
-          sendHtml(
-            res,
-            400,
-            "خطا",
-            `
-              <p class="error">
-                این ایمیل قبلاً ثبت شده است.
-              </p>
-
-              <a href="/signup">
-                بازگشت
-              </a>
-            `
-          );
-        }
-
-        return;
-      }
-
-      if (
-        req.method==="GET" &&
-        path==="/login"
-      ) {
-        sendHtml(
-          res,
-          200,
-          "ورود",
-          `
-            <div class="card">
-              <form
-                method="POST"
-                action="/login"
-              >
-
-                <input
-                  name="email"
-                  type="email"
-                  placeholder="ایمیل"
-                  required
-                >
-
-                <input
-                  name="password"
-                  type="password"
-                  placeholder="رمز عبور"
-                  required
-                >
-
-                <button class="full">
-                  ورود
-                </button>
-
-              </form>
-            </div>
-          `
-        );
-
-        return;
-      }
-
-      if (
-        req.method==="POST" &&
-        path==="/login"
-      ) {
-        const d=await readBody(req);
-
-        const email=(d.get("email")||"")
-          .trim()
-          .toLowerCase();
-
-        const password=d.get("password")||"";
-
-        const r=await pool.query(
-          `
-            SELECT
-              id,
-              name,
-              email
-            FROM users
-            WHERE email=$1
-            AND password=$2
-          `,
-          [
-            email,
-            hashPassword(password)
-          ]
-        );
-
-        if(!r.rows.length){
-          sendHtml(
-            res,
-            401,
-            "خطا",
-            `
-              <p class="error">
-                ایمیل یا رمز عبور اشتباه است.
-              </p>
-
-              <a href="/login">
-                تلاش دوباره
-              </a>
-            `
-          );
-
-          return;
-        }
-
-        const sid=
-          await createSession(
-            r.rows[0].id
-          );
-
-        redirect(
-          res,
-          "/",
-          `sessionId=${encodeURIComponent(
-            sid
-          )}; HttpOnly; Path=/; SameSite=Lax`
-        );
-
-        return;
-      }
-
-      if (!user) {
-        if (
-          ["/logout"].includes(path)
-        ) {
-          redirect(res,"/");
-        } else {
-          redirect(res,"/login");
-        }
-
-        return;
-      }
-
-      if (
-        req.method==="GET" &&
-        path==="/new-post"
-      ) {
-        sendHtml(
-          res,
-          200,
-          "انتشار پست",
-          `
-            <div class="card">
-              <form
-                method="POST"
-                action="/new-post"
-              >
-
-                <textarea
-                  name="content"
-                  maxlength="5000"
-                  placeholder="چه چیزی می‌خواهی منتشر کنی؟"
-                  required
-                ></textarea>
-
-                <button class="full">
-                  📸 انتشار
-                </button>
-
-              </form>
-            </div>
-          `,
-          user
-        );
-
-        return;
-      }
-
-      if (
-        req.method==="POST" &&
-        path==="/new-post"
-      ) {
-        const d=await readBody(req);
-
-        const content=
-          (d.get("content")||"").trim();
-
-        if(!content){
-          sendHtml(
-            res,
-            400,
-            "خطا",
-            `
-              <p class="error">
-                متن پست خالی است.
-              </p>
-            `,
-            user
-          );
-
-          return;
-        }
-
-        await pool.query(
-          `
-            INSERT INTO posts(
-              user_id,
-              content
-            )
-            VALUES($1,$2)
-          `,
-          [
-            user.id,
-            content
-          ]
-        );
-
-        redirect(res,"/");
-        return;
-      }
-
-      if (
-        req.method==="GET" &&
-        path==="/like"
-      ) {
-        const postId=
-          Number(
-            url.searchParams.get("post")
-          );
-
-        if(Number.isInteger(postId)){
-          const x=
-            await pool.query(
-              `
-                SELECT
-                  p.user_id,
-                  EXISTS(
-                    SELECT 1
-                    FROM likes
-                    WHERE post_id=$1
-                    AND user_id=$2
-                  ) liked
-                FROM posts p
-                WHERE p.id=$1
-              `,
-              [
-                postId,
-                user.id
-              ]
-            );
-
-          if(x.rows.length){
-            if(x.rows[0].liked){
-              await pool.query(
-                `
-                  DELETE FROM likes
-                  WHERE post_id=$1
-                  AND user_id=$2
-                `,
-                [
-                  postId,
-                  user.id
-                ]
-              );
-            } else {
-              await pool.query(
-                `
-                  INSERT INTO likes(
-                    post_id,
-                    user_id
-                  )
-                  VALUES($1,$2)
-                  ON CONFLICT DO NOTHING
-                `,
-                [
-                  postId,
-                  user.id
-                ]
-              );
-
-              await notify(
-                x.rows[0].user_id,
-                user.id,
-                "like",
-                postId,
-                `${user.name} پست شما را پسندید.`
-              );
-            }
-          }
-        }
-
-        redirect(res,"/");
-        return;
-      }
-
-      if (
-        req.method==="GET" &&
-        path==="/bookmark"
-      ) {
-        const postId=
-          Number(
-            url.searchParams.get("post")
-          );
-
-        if(Number.isInteger(postId)){
-          const x=
-            await pool.query(
-              `
-                SELECT id
-                FROM bookmarks
-                WHERE post_id=$1
-                AND user_id=$2
-              `,
-              [
-                postId,
-                user.id
-              ]
-            );
-
-          if(x.rows.length){
-            await pool.query(
-              `
-                DELETE FROM bookmarks
-                WHERE post_id=$1
-                AND user_id=$2
-              `,
-              [
-                postId,
-                user.id
-              ]
-            );
-          } else {
-            await pool.query(
-              `
-                INSERT INTO bookmarks(
-                  post_id,
-                  user_id
-                )
-                VALUES($1,$2)
-                ON CONFLICT DO NOTHING
-              `,
-              [
-                postId,
-                user.id
-              ]
-            );
-          }
-        }
-
-        redirect(res,"/");
-        return;
-      }if (
-        req.method==="GET" &&
-        path==="/post"
-      ) {
-        const postId =
-          Number(
-            url.searchParams.get("id")
-          );
-
-        if(!Number.isInteger(postId)){
-          redirect(res,"/");
-          return;
-        }
-
-        const r =
-          await pool.query(
-            `
-              SELECT
-                p.id,
-                p.user_id,
-                p.content,
-                p.created_at,
-                u.name,
-                u.email,
-
-                (
-                  SELECT COUNT(*)
-                  FROM likes l
-                  WHERE l.post_id=p.id
-                ) AS likes,
-
-                (
-                  SELECT COUNT(*)
-                  FROM comments c
-                  WHERE c.post_id=p.id
-                ) AS comments_count
-
-              FROM posts p
-
-              JOIN users u
-                ON u.id=p.user_id
-
-              WHERE p.id=$1
-            `,
-            [postId]
-          );
-
-        if(!r.rows.length){
-          sendHtml(
-            res,
-            404,
-            "پست پیدا نشد",
-            `
-              <div class="card">
-                <p class="error">
-                  پست مورد نظر پیدا نشد.
-                </p>
-              </div>
-            `,
-            user
-          );
-
-          return;
-        }
-
-        const post=r.rows[0];
-
-        const comments =
-          await pool.query(
-            `
-              SELECT
-                c.id,
-                c.comment,
-                c.created_at,
-                u.id AS user_id,
-                u.name,
-                u.email
-              FROM comments c
-              JOIN users u
-                ON u.id=c.user_id
-              WHERE c.post_id=$1
-              ORDER BY c.created_at ASC
-            `,
-            [postId]
-          );
-
-        let html=`
-          <div class="card">
-
-            <div class="profile-head">
-
-              <div class="avatar">
-                ${escapeHtml(
-                  post.name.charAt(0)
-                )}
-              </div>
-
-              <div>
-
-                <div class="username">
-                  ${escapeHtml(post.name)}
-                </div>
-
-                <div class="email">
-                  ${escapeHtml(post.email)}
-                </div>
-
-                <div class="small">
-                  ${new Date(
-                    post.created_at
-                  ).toLocaleString("fa-IR")}
-                </div>
-
-              </div>
-
-            </div>
-
-            <div class="post-text">
-              ${escapeHtml(post.content)}
-            </div>
-
-            <div class="stats">
-
-              <span>
-                ❤️ ${post.likes}
-              </span>
-
-              <span>
-                💬 ${post.comments_count}
-              </span>
-
-            </div>
-
-            <div class="actions">
-
-              <a href="/like?post=${post.id}">
-                <button>
-                  ❤️ لایک
-                </button>
-              </a>
-
               <a href="/">
                 <button>
                   🏠 خانه
                 </button>
               </a>
 
+              ${
+                post.user_id === user.id
+                  ? `
+                    <a href="/delete-post?id=${post.id}">
+                      <button class="danger">
+                        🗑️ حذف پست
+                      </button>
+                    </a>
+                  `
+                  : ""
+              }
+
             </div>
 
-          </div>
+          </article>
 
           <div class="card">
 
@@ -2292,7 +2189,7 @@ const server = http.createServer(
 
               <textarea
                 name="comment"
-                maxlength="2000"
+                maxlength="3000"
                 placeholder="نظر خود را بنویسید..."
                 required
               ></textarea>
@@ -2306,35 +2203,45 @@ const server = http.createServer(
           </div>
         `;
 
-        if(!comments.rows.length){
+        if (!comments.rows.length) {
+
           html += `
             <div class="card empty">
               هنوز نظری ثبت نشده است.
             </div>
           `;
+
         } else {
-          for(const c of comments.rows){
+
+          for (const c of comments.rows) {
+
             html += `
               <div class="card">
 
                 <div class="profile-head">
 
-                  <div class="avatar">
-                    ${escapeHtml(
-                      c.name.charAt(0)
-                    )}
-                  </div>
+                  <a href="/profile?id=${c.user_id}">
+                    <div class="avatar">
+                      ${escapeHtml(
+                        c.name.charAt(0)
+                      )}
+                    </div>
+                  </a>
 
                   <div>
-                    <div class="username">
-                      ${escapeHtml(c.name)}
-                    </div>
+
+                    <a href="/profile?id=${c.user_id}">
+                      <div class="username">
+                        ${escapeHtml(c.name)}
+                      </div>
+                    </a>
 
                     <div class="small">
                       ${new Date(
                         c.created_at
                       ).toLocaleString("fa-IR")}
                     </div>
+
                   </div>
 
                 </div>
@@ -2359,34 +2266,42 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         COMMENT
+      ===================================================== */
+
       if (
-        req.method==="POST" &&
-        path==="/comment"
+        req.method === "POST" &&
+        path === "/comment"
       ) {
-        const d=
+
+        const data =
           await readBody(req);
 
-        const postId=
+        const postId =
           Number(
-            d.get("post_id")
+            data.get("post_id")
           );
 
-        const comment=
-          (d.get("comment")||"")
+        const comment =
+          (data.get("comment") || "")
             .trim();
 
-        if(
+        if (
           !Number.isInteger(postId) ||
           !comment
-        ){
+        ) {
+
           sendHtml(
             res,
             400,
             "خطا",
             `
-              <p class="error">
-                اطلاعات نظر معتبر نیست.
-              </p>
+              <div class="card">
+                <p class="error">
+                  اطلاعات نظر معتبر نیست.
+                </p>
+              </div>
             `,
             user
           );
@@ -2394,26 +2309,28 @@ const server = http.createServer(
           return;
         }
 
-        const post=
+        const post =
           await pool.query(
             `
-              SELECT
-                user_id
+              SELECT user_id
               FROM posts
               WHERE id=$1
             `,
             [postId]
           );
 
-        if(!post.rows.length){
+        if (!post.rows.length) {
+
           sendHtml(
             res,
             404,
             "خطا",
             `
-              <p class="error">
-                پست پیدا نشد.
-              </p>
+              <div class="card">
+                <p class="error">
+                  پست پیدا نشد.
+                </p>
+              </div>
             `,
             user
           );
@@ -2453,10 +2370,15 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         PROFILE
+      ===================================================== */
+
       if (
-        req.method==="GET" &&
-        path==="/profile"
+        req.method === "GET" &&
+        path === "/profile"
       ) {
+
         const profileId =
           Number(
             url.searchParams.get("id")
@@ -2478,7 +2400,8 @@ const server = http.createServer(
             [profileId]
           );
 
-        if(!r.rows.length){
+        if (!r.rows.length) {
+
           sendHtml(
             res,
             404,
@@ -2496,9 +2419,10 @@ const server = http.createServer(
           return;
         }
 
-        const profile=r.rows[0];
+        const profile =
+          r.rows[0];
 
-        const followerCount=
+        const followerCount =
           await pool.query(
             `
               SELECT COUNT(*)
@@ -2508,7 +2432,7 @@ const server = http.createServer(
             [profileId]
           );
 
-        const followingCount=
+        const followingCount =
           await pool.query(
             `
               SELECT COUNT(*)
@@ -2518,7 +2442,7 @@ const server = http.createServer(
             [profileId]
           );
 
-        const isFollowing=
+        const isFollowing =
           await pool.query(
             `
               SELECT id
@@ -2532,12 +2456,27 @@ const server = http.createServer(
             ]
           );
 
-        const posts=
+        const isBlocked =
+          await pool.query(
+            `
+              SELECT id
+              FROM blocked_users
+              WHERE blocker_id=$1
+              AND blocked_id=$2
+            `,
+            [
+              user.id,
+              profileId
+            ]
+          );
+
+        const posts =
           await pool.query(
             `
               SELECT
                 id,
                 content,
+                image_url,
                 created_at
               FROM posts
               WHERE user_id=$1
@@ -2547,15 +2486,28 @@ const server = http.createServer(
             [profileId]
           );
 
-        let html=`
+        let html = `
           <div class="card">
 
             <div class="profile-head">
 
               <div class="avatar">
-                ${escapeHtml(
-                  profile.name.charAt(0)
-                )}
+
+                ${
+                  profile.avatar_url
+                    ? `
+                      <img
+                        src="${escapeHtml(
+                          profile.avatar_url
+                        )}"
+                        alt="تصویر پروفایل"
+                      >
+                    `
+                    : escapeHtml(
+                        profile.name.charAt(0)
+                      )
+                }
+
               </div>
 
               <div>
@@ -2597,9 +2549,21 @@ const server = http.createServer(
             </div>
 
             ${
-              profileId !== user.id
+              profileId === user.id
                 ? `
                   <div class="actions">
+
+                    <a href="/settings">
+                      <button>
+                        ⚙️ ویرایش پروفایل
+                      </button>
+                    </a>
+
+                  </div>
+                `
+                : `
+                  <div class="actions">
+
                     <a href="/follow?user=${profileId}">
                       <button class="follow">
                         ${
@@ -2618,25 +2582,33 @@ const server = http.createServer(
 
                     <a href="/block?user=${profileId}">
                       <button class="danger">
-                        🚫 مسدود کردن
+                        ${
+                          isBlocked.rows.length
+                            ? "🔓 رفع مسدودی"
+                            : "🚫 مسدود کردن"
+                        }
                       </button>
                     </a>
+
                   </div>
                 `
-                : ""
             }
 
           </div>
         `;
 
-        if(!posts.rows.length){
+        if (!posts.rows.length) {
+
           html += `
             <div class="card empty">
               هنوز پستی منتشر نشده است.
             </div>
           `;
+
         } else {
-          for(const p of posts.rows){
+
+          for (const p of posts.rows) {
+
             html += `
               <div class="card">
 
@@ -2650,11 +2622,41 @@ const server = http.createServer(
                   ${escapeHtml(p.content)}
                 </div>
 
-                <a href="/post?id=${p.id}">
-                  <button>
-                    💬 مشاهده پست
-                  </button>
-                </a>
+                ${
+                  p.image_url
+                    ? `
+                      <img
+                        class="post-image"
+                        src="${escapeHtml(
+                          p.image_url
+                        )}"
+                        alt="تصویر پست"
+                      >
+                    `
+                    : ""
+                }
+
+                <div class="actions">
+
+                  <a href="/post?id=${p.id}">
+                    <button>
+                      💬 مشاهده پست
+                    </button>
+                  </a>
+
+                  ${
+                    profileId === user.id
+                      ? `
+                        <a href="/delete-post?id=${p.id}">
+                          <button class="danger">
+                            🗑️ حذف
+                          </button>
+                        </a>
+                      `
+                      : ""
+                  }
+
+                </div>
 
               </div>
             `;
@@ -2670,10 +2672,17 @@ const server = http.createServer(
         );
 
         return;
-      }if (
-        req.method==="GET" &&
-        path==="/follow"
+      }
+
+      /* =====================================================
+         FOLLOW
+      ===================================================== */
+
+      if (
+        req.method === "GET" &&
+        path === "/follow"
       ) {
+
         const targetId =
           Number(
             url.searchParams.get("user")
@@ -2683,7 +2692,12 @@ const server = http.createServer(
           !Number.isInteger(targetId) ||
           targetId === user.id
         ) {
-          redirect(res,"/");
+
+          redirect(
+            res,
+            "/"
+          );
+
           return;
         }
 
@@ -2697,8 +2711,45 @@ const server = http.createServer(
             [targetId]
           );
 
-        if(!target.rows.length){
-          redirect(res,"/");
+        if (!target.rows.length) {
+
+          redirect(
+            res,
+            "/"
+          );
+
+          return;
+        }
+
+        const blocked =
+          await pool.query(
+            `
+              SELECT id
+              FROM blocked_users
+              WHERE
+                (
+                  blocker_id=$1
+                  AND blocked_id=$2
+                )
+                OR
+                (
+                  blocker_id=$2
+                  AND blocked_id=$1
+                )
+            `,
+            [
+              user.id,
+              targetId
+            ]
+          );
+
+        if (blocked.rows.length) {
+
+          redirect(
+            res,
+            `/profile?id=${targetId}`
+          );
+
           return;
         }
 
@@ -2716,7 +2767,8 @@ const server = http.createServer(
             ]
           );
 
-        if(existing.rows.length){
+        if (existing.rows.length) {
+
           await pool.query(
             `
               DELETE FROM follows
@@ -2728,7 +2780,9 @@ const server = http.createServer(
               targetId
             ]
           );
+
         } else {
+
           await pool.query(
             `
               INSERT INTO follows(
@@ -2761,26 +2815,35 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         SEARCH
+      ===================================================== */
+
       if (
-        req.method==="GET" &&
-        path==="/search"
+        req.method === "GET" &&
+        path === "/search"
       ) {
+
         const q =
-          (url.searchParams.get("q")||"")
+          (url.searchParams.get("q") || "")
             .trim();
 
-        let html=`
+        let html = `
           <div class="card">
 
             <h2>
               🔎 جستجوی کاربران
             </h2>
 
-            <form method="GET" action="/search">
+            <form
+              method="GET"
+              action="/search"
+            >
 
               <input
                 name="q"
                 value="${escapeHtml(q)}"
+                maxlength="255"
                 placeholder="نام یا ایمیل..."
               >
 
@@ -2793,45 +2856,68 @@ const server = http.createServer(
           </div>
         `;
 
-        if(q){
-          const results=
+        if (q) {
+
+          const results =
             await pool.query(
               `
                 SELECT
                   id,
                   name,
                   email,
-                  bio
+                  bio,
+                  avatar_url
                 FROM users
+
                 WHERE
                   name ILIKE $1
                   OR email ILIKE $1
+
                 ORDER BY name
+
                 LIMIT 50
               `,
               [`%${q}%`]
             );
 
-          if(!results.rows.length){
+          if (!results.rows.length) {
+
             html += `
               <div class="card empty">
                 نتیجه‌ای پیدا نشد.
               </div>
             `;
+
           } else {
-            for(const u of results.rows){
+
+            for (const u of results.rows) {
+
               html += `
                 <div class="card">
 
                   <div class="profile-head">
 
                     <div class="avatar">
-                      ${escapeHtml(
-                        u.name.charAt(0)
-                      )}
+
+                      ${
+                        u.avatar_url
+                          ? `
+                            <img
+                              src="${escapeHtml(
+                                u.avatar_url
+                              )}"
+                              alt="تصویر"
+                            >
+                          `
+                          : escapeHtml(
+                              u.name.charAt(0)
+                            )
+                      }
+
                     </div>
 
                     <div>
+
                       <div class="username">
                         ${escapeHtml(u.name)}
                       </div>
@@ -2849,16 +2935,19 @@ const server = http.createServer(
                           `
                           : ""
                       }
+
                     </div>
 
                   </div>
 
                   <div class="actions">
+
                     <a href="/profile?id=${u.id}">
                       <button>
                         👤 مشاهده پروفایل
                       </button>
                     </a>
+
                   </div>
 
                 </div>
@@ -2878,19 +2967,25 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         MESSAGES
+      ===================================================== */
+
       if (
-        req.method==="GET" &&
-        path==="/messages"
+        req.method === "GET" &&
+        path === "/messages"
       ) {
+
         const otherId =
           Number(
             url.searchParams.get("user")
           );
 
-        if(
+        if (
           Number.isInteger(otherId) &&
           otherId !== user.id
-        ){
+        ) {
+
           const other =
             await pool.query(
               `
@@ -2904,8 +2999,54 @@ const server = http.createServer(
               [otherId]
             );
 
-          if(!other.rows.length){
-            redirect(res,"/messages");
+          if (!other.rows.length) {
+
+            redirect(
+              res,
+              "/messages"
+            );
+
+            return;
+          }
+
+          const blocked =
+            await pool.query(
+              `
+                SELECT id
+                FROM blocked_users
+                WHERE
+                  (
+                    blocker_id=$1
+                    AND blocked_id=$2
+                  )
+                  OR
+                  (
+                    blocker_id=$2
+                    AND blocked_id=$1
+                  )
+              `,
+              [
+                user.id,
+                otherId
+              ]
+            );
+
+          if (blocked.rows.length) {
+
+            sendHtml(
+              res,
+              403,
+              "مسدود",
+              `
+                <div class="card">
+                  <p class="error">
+                    امکان ارسال پیام به این کاربر وجود ندارد.
+                  </p>
+                </div>
+              `,
+              user
+            );
+
             return;
           }
 
@@ -2919,9 +3060,12 @@ const server = http.createServer(
                   m.message,
                   m.created_at,
                   u.name
+
                 FROM messages m
+
                 JOIN users u
                   ON u.id=m.sender_id
+
                 WHERE
                   (
                     m.sender_id=$1
@@ -2932,7 +3076,9 @@ const server = http.createServer(
                     m.sender_id=$2
                     AND m.receiver_id=$1
                   )
+
                 ORDER BY m.created_at ASC
+
                 LIMIT 200
               `,
               [
@@ -2941,7 +3087,7 @@ const server = http.createServer(
               ]
             );
 
-          let html=`
+          let html = `
             <div class="card">
 
               <h2>
@@ -2978,14 +3124,18 @@ const server = http.createServer(
             </div>
           `;
 
-          if(!messages.rows.length){
+          if (!messages.rows.length) {
+
             html += `
               <div class="card empty">
                 هنوز پیامی وجود ندارد.
               </div>
             `;
+
           } else {
-            for(const m of messages.rows){
+
+            for (const m of messages.rows) {
+
               html += `
                 <div class="card">
 
@@ -3026,8 +3176,11 @@ const server = http.createServer(
                 u.id,
                 u.name,
                 u.email
+
               FROM users u
+
               WHERE u.id IN(
+
                 SELECT receiver_id
                 FROM messages
                 WHERE sender_id=$1
@@ -3037,14 +3190,17 @@ const server = http.createServer(
                 SELECT sender_id
                 FROM messages
                 WHERE receiver_id=$1
+
               )
+
               ORDER BY u.name
             `,
             [user.id]
           );
 
-        let html=`
+        let html = `
           <div class="card">
+
             <h2>
               💬 پیام‌ها
             </h2>
@@ -3052,17 +3208,22 @@ const server = http.createServer(
             <p class="small">
               برای شروع گفتگو، پروفایل یک کاربر را باز کنید.
             </p>
+
           </div>
         `;
 
-        if(!contacts.rows.length){
+        if (!contacts.rows.length) {
+
           html += `
             <div class="card empty">
               هنوز گفتگویی ندارید.
             </div>
           `;
+
         } else {
-          for(const c of contacts.rows){
+
+          for (const c of contacts.rows) {
+
             html += `
               <div class="card">
 
@@ -3075,6 +3236,7 @@ const server = http.createServer(
                   </div>
 
                   <div>
+
                     <div class="username">
                       ${escapeHtml(c.name)}
                     </div>
@@ -3082,16 +3244,19 @@ const server = http.createServer(
                     <div class="email">
                       ${escapeHtml(c.email)}
                     </div>
+
                   </div>
 
                 </div>
 
                 <div class="actions">
+
                   <a href="/messages?user=${c.id}">
                     <button>
                       💬 باز کردن گفتگو
                     </button>
                   </a>
+
                 </div>
 
               </div>
@@ -3110,28 +3275,38 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         SEND MESSAGE
+      ===================================================== */
+
       if (
-        req.method==="POST" &&
-        path==="/messages"
+        req.method === "POST" &&
+        path === "/messages"
       ) {
-        const d=
+
+        const data =
           await readBody(req);
 
-        const receiverId=
+        const receiverId =
           Number(
-            d.get("receiver_id")
+            data.get("receiver_id")
           );
 
-        const message=
-          (d.get("message")||"")
+        const message =
+          (data.get("message") || "")
             .trim();
 
-        if(
+        if (
           !Number.isInteger(receiverId) ||
           receiverId === user.id ||
           !message
-        ){
-          redirect(res,"/messages");
+        ) {
+
+          redirect(
+            res,
+            "/messages"
+          );
+
           return;
         }
 
@@ -3145,8 +3320,54 @@ const server = http.createServer(
             [receiverId]
           );
 
-        if(!receiver.rows.length){
-          redirect(res,"/messages");
+        if (!receiver.rows.length) {
+
+          redirect(
+            res,
+            "/messages"
+          );
+
+          return;
+        }
+
+        const blocked =
+          await pool.query(
+            `
+              SELECT id
+              FROM blocked_users
+              WHERE
+                (
+                  blocker_id=$1
+                  AND blocked_id=$2
+                )
+                OR
+                (
+                  blocker_id=$2
+                  AND blocked_id=$1
+                )
+            `,
+            [
+              user.id,
+              receiverId
+            ]
+          );
+
+        if (blocked.rows.length) {
+
+          sendHtml(
+            res,
+            403,
+            "مسدود",
+            `
+              <div class="card">
+                <p class="error">
+                  امکان ارسال پیام به این کاربر وجود ندارد.
+                </p>
+              </div>
+            `,
+            user
+          );
+
           return;
         }
 
@@ -3180,10 +3401,17 @@ const server = http.createServer(
         );
 
         return;
-      }if (
-        req.method==="GET" &&
-        path==="/notifications"
+      }
+
+      /* =====================================================
+         NOTIFICATIONS
+      ===================================================== */
+
+      if (
+        req.method === "GET" &&
+        path === "/notifications"
       ) {
+
         const notifications =
           await pool.query(
             `
@@ -3194,11 +3422,16 @@ const server = http.createServer(
                 n.is_read,
                 n.created_at,
                 u.name AS actor_name
+
               FROM notifications n
+
               LEFT JOIN users u
                 ON u.id=n.actor_id
+
               WHERE n.user_id=$1
+
               ORDER BY n.created_at DESC
+
               LIMIT 100
             `,
             [user.id]
@@ -3213,24 +3446,30 @@ const server = http.createServer(
           [user.id]
         );
 
-        let html=`
+        let html = `
           <div class="card">
+
             <h2>
               🔔 اعلان‌ها
             </h2>
+
           </div>
         `;
 
-        if(!notifications.rows.length){
+        if (!notifications.rows.length) {
+
           html += `
             <div class="card empty">
               اعلان جدیدی ندارید.
             </div>
           `;
+
         } else {
-          for(
+
+          for (
             const n of notifications.rows
-          ){
+          ) {
+
             html += `
               <div class="card">
 
@@ -3266,20 +3505,27 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         SAVED
+      ===================================================== */
+
       if (
-        req.method==="GET" &&
-        path==="/saved"
+        req.method === "GET" &&
+        path === "/saved"
       ) {
+
         const saved =
           await pool.query(
             `
               SELECT
                 p.id,
                 p.content,
+                p.image_url,
                 p.created_at,
                 u.id AS user_id,
                 u.name,
                 u.email
+
               FROM bookmarks b
 
               JOIN posts p
@@ -3297,24 +3543,30 @@ const server = http.createServer(
             [user.id]
           );
 
-        let html=`
+        let html = `
           <div class="card">
+
             <h2>
               🔖 پست‌های ذخیره‌شده
             </h2>
+
           </div>
         `;
 
-        if(!saved.rows.length){
+        if (!saved.rows.length) {
+
           html += `
             <div class="card empty">
               هنوز پستی ذخیره نکرده‌اید.
             </div>
           `;
+
         } else {
-          for(
+
+          for (
             const p of saved.rows
-          ){
+          ) {
+
             html += `
               <article class="card">
 
@@ -3327,6 +3579,7 @@ const server = http.createServer(
                   </div>
 
                   <div>
+
                     <div class="username">
                       ${escapeHtml(p.name)}
                     </div>
@@ -3340,6 +3593,7 @@ const server = http.createServer(
                         p.created_at
                       ).toLocaleString("fa-IR")}
                     </div>
+
                   </div>
 
                 </div>
@@ -3347,6 +3601,20 @@ const server = http.createServer(
                 <div class="post-text">
                   ${escapeHtml(p.content)}
                 </div>
+
+                ${
+                  p.image_url
+                    ? `
+                      <img
+                        class="post-image"
+                        src="${escapeHtml(
+                          p.image_url
+                        )}"
+                        alt="تصویر"
+                      >
+                    `
+                    : ""
+                }
 
                 <div class="actions">
 
@@ -3380,10 +3648,15 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         REPORT GET
+      ===================================================== */
+
       if (
-        req.method==="GET" &&
-        path==="/report"
+        req.method === "GET" &&
+        path === "/report"
       ) {
+
         const postId =
           Number(
             url.searchParams.get("post")
@@ -3394,13 +3667,18 @@ const server = http.createServer(
             url.searchParams.get("user")
           );
 
-        if(
+        if (
           !Number.isInteger(postId) &&
           !Number.isInteger(
             reportedUserId
           )
-        ){
-          redirect(res,"/");
+        ) {
+
+          redirect(
+            res,
+            "/"
+          );
+
           return;
         }
 
@@ -3465,28 +3743,33 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         REPORT POST
+      ===================================================== */
+
       if (
-        req.method==="POST" &&
-        path==="/report"
+        req.method === "POST" &&
+        path === "/report"
       ) {
-        const d=
+
+        const data =
           await readBody(req);
 
         const postId =
           Number(
-            d.get("post_id")
+            data.get("post_id")
           );
 
         const reportedUserId =
           Number(
-            d.get("reported_user_id")
+            data.get("reported_user_id")
           );
 
         const reason =
-          (d.get("reason")||"")
+          (data.get("reason") || "")
             .trim();
 
-        if(
+        if (
           !reason ||
           (
             !Number.isInteger(postId) &&
@@ -3494,8 +3777,13 @@ const server = http.createServer(
               reportedUserId
             )
           )
-        ){
-          redirect(res,"/");
+        ) {
+
+          redirect(
+            res,
+            "/"
+          );
+
           return;
         }
 
@@ -3511,14 +3799,17 @@ const server = http.createServer(
           `,
           [
             user.id,
+
             Number.isInteger(
               reportedUserId
             )
               ? reportedUserId
               : null,
+
             Number.isInteger(postId)
               ? postId
               : null,
+
             reason
           ]
         );
@@ -3546,37 +3837,50 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         BLOCK
+      ===================================================== */
+
       if (
-        req.method==="GET" &&
-        path==="/block"
+        req.method === "GET" &&
+        path === "/block"
       ) {
+
         const targetId =
           Number(
             url.searchParams.get("user")
           );
 
-        if(
+        if (
           !Number.isInteger(targetId) ||
           targetId === user.id
-        ){
-          redirect(res,"/");
+        ) {
+
+          redirect(
+            res,
+            "/"
+          );
+
           return;
         }
 
         const target =
           await pool.query(
             `
-              SELECT
-                id,
-                name
+              SELECT id
               FROM users
               WHERE id=$1
             `,
             [targetId]
           );
 
-        if(!target.rows.length){
-          redirect(res,"/");
+        if (!target.rows.length) {
+
+          redirect(
+            res,
+            "/"
+          );
+
           return;
         }
 
@@ -3594,7 +3898,8 @@ const server = http.createServer(
             ]
           );
 
-        if(existing.rows.length){
+        if (existing.rows.length) {
+
           await pool.query(
             `
               DELETE FROM blocked_users
@@ -3606,7 +3911,9 @@ const server = http.createServer(
               targetId
             ]
           );
+
         } else {
+
           await pool.query(
             `
               INSERT INTO blocked_users(
@@ -3643,14 +3950,23 @@ const server = http.createServer(
           );
         }
 
-        redirect(res,"/");
+        redirect(
+          res,
+          `/profile?id=${targetId}`
+        );
+
         return;
       }
 
+      /* =====================================================
+         JOBS
+      ===================================================== */
+
       if (
-        req.method==="GET" &&
-        path==="/jobs"
+        req.method === "GET" &&
+        path === "/jobs"
       ) {
+
         const jobs =
           await pool.query(
             `
@@ -3676,7 +3992,7 @@ const server = http.createServer(
             `
           );
 
-        let html=`
+        let html = `
           <div class="card">
 
             <h2>
@@ -3692,16 +4008,20 @@ const server = http.createServer(
           </div>
         `;
 
-        if(!jobs.rows.length){
+        if (!jobs.rows.length) {
+
           html += `
             <div class="card empty">
               هنوز آگهی کاری ثبت نشده است.
             </div>
           `;
+
         } else {
-          for(
+
+          for (
             const j of jobs.rows
-          ){
+          ) {
+
             html += `
               <div class="card">
 
@@ -3734,6 +4054,22 @@ const server = http.createServer(
                   ).toLocaleString("fa-IR")}
                 </div>
 
+                ${
+                  j.user_id === user.id
+                    ? `
+                      <div class="actions">
+
+                        <a href="/delete-job?id=${j.id}">
+                          <button class="danger">
+                            🗑️ حذف آگهی
+                          </button>
+                        </a>
+
+                      </div>
+                    `
+                    : ""
+                }
+
               </div>
             `;
           }
@@ -3748,10 +4084,17 @@ const server = http.createServer(
         );
 
         return;
-      }if (
-        req.method==="GET" &&
-        path==="/new-job"
+      }
+
+      /* =====================================================
+         NEW JOB
+      ===================================================== */
+
+      if (
+        req.method === "GET" &&
+        path === "/new-job"
       ) {
+
         sendHtml(
           res,
           200,
@@ -3811,43 +4154,47 @@ const server = http.createServer(
       }
 
       if (
-        req.method==="POST" &&
-        path==="/new-job"
+        req.method === "POST" &&
+        path === "/new-job"
       ) {
-        const d=
+
+        const data =
           await readBody(req);
 
-        const title=
-          (d.get("title")||"")
+        const title =
+          (data.get("title") || "")
             .trim();
 
-        const city=
-          (d.get("city")||"")
+        const city =
+          (data.get("city") || "")
             .trim();
 
-        const salary=
-          (d.get("salary")||"")
+        const salary =
+          (data.get("salary") || "")
             .trim();
 
-        const description=
-          (d.get("description")||"")
+        const description =
+          (data.get("description") || "")
             .trim();
 
-        if(
+        if (
           !title ||
           !city ||
           !salary ||
           !description
-        ){
+        ) {
+
           sendHtml(
             res,
             400,
             "خطا",
             `
               <div class="card">
+
                 <p class="error">
                   همه فیلدها را کامل کنید.
                 </p>
+
               </div>
             `,
             user
@@ -3884,11 +4231,16 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         SETTINGS
+      ===================================================== */
+
       if (
-        req.method==="GET" &&
-        path==="/settings"
+        req.method === "GET" &&
+        path === "/settings"
       ) {
-        const r=
+
+        const r =
           await pool.query(
             `
               SELECT
@@ -3902,7 +4254,7 @@ const server = http.createServer(
             [user.id]
           );
 
-        const profile=
+        const profile =
           r.rows[0] || user;
 
         sendHtml(
@@ -3964,34 +4316,38 @@ const server = http.createServer(
       }
 
       if (
-        req.method==="POST" &&
-        path==="/settings"
+        req.method === "POST" &&
+        path === "/settings"
       ) {
-        const d=
+
+        const data =
           await readBody(req);
 
-        const name=
-          (d.get("name")||"")
+        const name =
+          (data.get("name") || "")
             .trim();
 
-        const bio=
-          (d.get("bio")||"")
+        const bio =
+          (data.get("bio") || "")
             .trim();
 
-        const avatarUrl=
-          (d.get("avatar_url")||"")
+        const avatarUrl =
+          (data.get("avatar_url") || "")
             .trim();
 
-        if(!name){
+        if (!name) {
+
           sendHtml(
             res,
             400,
             "خطا",
             `
               <div class="card">
+
                 <p class="error">
                   نام نمی‌تواند خالی باشد.
                 </p>
+
               </div>
             `,
             user
@@ -4003,10 +4359,12 @@ const server = http.createServer(
         await pool.query(
           `
             UPDATE users
+
             SET
               name=$1,
               bio=$2,
               avatar_url=$3
+
             WHERE id=$4
           `,
           [
@@ -4025,16 +4383,22 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         DELETE POST
+      ===================================================== */
+
       if (
-        req.method==="GET" &&
-        path==="/delete-post"
+        req.method === "GET" &&
+        path === "/delete-post"
       ) {
-        const postId=
+
+        const postId =
           Number(
             url.searchParams.get("id")
           );
 
-        if(Number.isInteger(postId)){
+        if (Number.isInteger(postId)) {
+
           await pool.query(
             `
               DELETE FROM posts
@@ -4056,16 +4420,22 @@ const server = http.createServer(
         return;
       }
 
+      /* =====================================================
+         DELETE JOB
+      ===================================================== */
+
       if (
-        req.method==="GET" &&
-        path==="/delete-job"
+        req.method === "GET" &&
+        path === "/delete-job"
       ) {
-        const jobId=
+
+        const jobId =
           Number(
             url.searchParams.get("id")
           );
 
-        if(Number.isInteger(jobId)){
+        if (Number.isInteger(jobId)) {
+
           await pool.query(
             `
               DELETE FROM jobs
@@ -4087,31 +4457,9 @@ const server = http.createServer(
         return;
       }
 
-      if (
-        req.method==="GET" &&
-        path==="/logout"
-      ) {
-        const cookies=
-          parseCookies(req);
-
-        if(cookies.sessionId){
-          await pool.query(
-            `
-              DELETE FROM sessions
-              WHERE session_id=$1
-            `,
-            [cookies.sessionId]
-          );
-        }
-
-        redirect(
-          res,
-          "/login",
-          "sessionId=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax"
-        );
-
-        return;
-      }
+      /* =====================================================
+         404
+      ===================================================== */
 
       sendHtml(
         res,
@@ -4139,14 +4487,15 @@ const server = http.createServer(
         user
       );
 
-    } catch(error) {
+    } catch (error) {
 
       console.error(
         "REQUEST ERROR:",
         error
       );
 
-      if(!res.headersSent){
+      if (!res.headersSent) {
+
         sendHtml(
           res,
           500,
@@ -4170,16 +4519,23 @@ const server = http.createServer(
           `,
           null
         );
+
       } else {
+
         res.end();
+
       }
     }
   }
 );
 
-async function startServer(){
+/* =========================================================
+   START
+========================================================= */
 
-  try{
+async function startServer() {
+
+  try {
 
     await createTables();
 
@@ -4191,13 +4547,15 @@ async function startServer(){
       PORT,
       "0.0.0.0",
       () => {
+
         console.log(
           `Server running on port ${PORT}`
         );
+
       }
     );
 
-  }catch(error){
+  } catch (error) {
 
     console.error(
       "STARTUP ERROR:",
