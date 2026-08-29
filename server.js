@@ -595,7 +595,7 @@ if (localStorage.getItem("dark") === "true") {
 
 async function ensureColumn(table, column, definition) {
   await pool.query(
-    \`ALTER TABLE ${table}
+    `ALTER TABLE ${table}
      ADD COLUMN IF NOT EXISTS ${column} ${definition}\`
   );
 }
@@ -611,7 +611,7 @@ async function createTables() {
     )
   \`);
 
-  await pool.query(\`
+  await pool.query(
     CREATE TABLE IF NOT EXISTS sessions (
       session_id TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL
