@@ -1,128 +1,23 @@
-const http = require("http");
+ const http = require("http");
 const crypto = require("crypto");
-const util = require("util");
 const { Pool } = require("pg");
 
-const scryptAsync = util.promisify(crypto.scrypt);
+const PORT = process.env.PORT || 10000;
 
-const PORT = Number(process.env.PORT || 10000);
-const DATABASE_URL = process.env.DATABASE_URL;
-
-if (!DATABASE_URL) {
+if (!process.env.DATABASE_URL) {
   console.error("STARTUP ERROR: DATABASE_URL is not set.");
   process.exit(1);
 }
 
 const pool = new Pool({
-  connectionString: DATABASE_URL,
+  connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
   connectionTimeoutMillis: 10000
 });
 
-/* =========================================================
-   PASSWORD
-========================================================= */
-
 function hashPassword(password) {
-  return crypto
-    .createHash("sha256")
-    .update(String(password))
-    .digest("hex");
+  return crypto.createHash("sha256").update(password).digest("hex");
 }
-
-async function hashPasswordScrypt(password) {
-  const salt = crypto.randomBytes(16).toString("hex");
-
-  const derivedKey = await scryptAsync(
-    String(password),
-    salt,
-    64
-  );
-
-  return `scrypt$${salt}$${Buffer.from(derivedKey).toString("hex")}`;
-}
-
-async function verifyPassword(password, stored) {
-  const value = String(stored || "");
-  const plain = String(password || "");
-
-  if (/^[a-f0-9]{64}$/i.test(value)) {
-    const hash = hashPassword(plain);
-
-    return crypto.timingSafeEqual(
-      Buffer.from(hash, "hex"),
-      Buffer.from(value, "hex")
-    );
-  }
-
-  if (value.startsWith("scrypt$")) {
-    const parts = value.split("$");
-
-    if (parts.length !== 3) {
-      return false;
-    }
-
-    const salt = parts[1];
-    const expectedHex = parts[2];
-
-    try {
-      const derivedKey = await scryptAsync(
-        plain,
-        salt,
-        64
-      );
-
-      const actual = Buffer.from(derivedKey);
-      const expected = Buffer.from(expectedHex, "hex");
-
-      if (actual.length !== expected.length) {
-        return false;
-      }
-
-      return crypto.timingSafeEqual(
-        actual,
-        expected
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  if (value.includes(":")) {
-    const parts = value.split(":");
-
-    if (parts.length === 2) {
-      const salt = parts[0];
-      const expectedHex = parts[1];
-
-      try {
-        const derivedKey = await scryptAsync(
-          plain,
-          salt,
-          64
-        );
-
-        const actual = Buffer.from(derivedKey);
-        const expected = Buffer.from(expectedHex, "hex");
-
-        if (actual.length === expected.length) {
-          return crypto.timingSafeEqual(
-            actual,
-            expected
-          );
-        }
-      } catch {
-        return false;
-      }
-    }
-  }
-
-  return false;
-}
-
-/* =========================================================
-   HELPERS
-========================================================= */
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -133,32 +28,42 @@ function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
-function escapeAttr(value) {
-  return escapeHtml(value);
-}
-
 function parseCookies(req) {
   const cookies = {};
   const header = req.headers.cookie || "";
-
   header.split(";").forEach(part => {
-    const index = part.indexOf("=");
-
-    if (index < 0) {
-      return;
-    }
-
-    const key = part.slice(0, index).trim();
-    const value = part.slice(index + 1).trim();
-
+    const i = part.indexOf("=");
+    if (i < 0) return;
+    const key = part.slice(0, i).trim();
+    const value = part.slice(i + 1).trim();
     try {
       cookies[key] = decodeURIComponent(value);
     } catch {
       cookies[key] = value;
     }
   });
-
   return cookies;
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+
+    req.on("data", chunk => {
+      body += chunk;
+
+      if (body.length > 1024 * 1024) {
+        reject(new Error("Request body too large"));
+        req.destroy();
+      }
+    });
+
+    req.on("end", () => {
+      resolve(new URLSearchParams(body));
+    });
+
+    req.on("error", reject);
+  });
 }
 
 function redirect(res, location, cookie) {
@@ -174,359 +79,61 @@ function redirect(res, location, cookie) {
   res.end();
 }
 
-function sendJson(res, status, data) {
-  if (res.headersSent) {
-    return;
-  }
-
-  res.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store"
-  });
-
-  res.end(JSON.stringify(data));
-}
-
-function sendHtml(
-  res,
-  status,
-  title,
-  content,
-  user = null
-) {
-  if (res.headersSent) {
-    return;
-  }
-
+function sendHtml(res, status, title, content, user = null) {
   res.writeHead(status, {
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-store"
   });
 
-  res.end(
-    page(
-      title,
-      content,
-      user
-    )
-  );
+  res.end(page(title, content, user));
 }
-
-function readBody(req, maxSize = 1024 * 1024) {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    let finished = false;
-
-    req.on("data", chunk => {
-      if (finished) {
-        return;
-      }
-
-      body += chunk.toString();
-
-      if (Buffer.byteLength(body, "utf8") > maxSize) {
-        finished = true;
-
-        reject(
-          new Error("Request body too large")
-        );
-
-        try {
-          req.destroy();
-        } catch {}
-      }
-    });
-
-    req.on("end", () => {
-      if (!finished) {
-        resolve(
-          new URLSearchParams(body)
-        );
-      }
-    });
-
-    req.on("error", reject);
-  });
-}
-
-/* =========================================================
-   MULTIPART IMAGE UPLOAD
-========================================================= */
-
-function readMultipart(req, maxSize = 3 * 1024 * 1024) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let total = 0;
-
-    req.on("data", chunk => {
-      total += chunk.length;
-
-      if (total > maxSize) {
-        reject(
-          new Error("فایل بیش از حد بزرگ است.")
-        );
-
-        try {
-          req.destroy();
-        } catch {}
-
-        return;
-      }
-
-      chunks.push(chunk);
-    });
-
-    req.on("end", () => {
-      try {
-        const buffer = Buffer.concat(chunks);
-        const contentType =
-          req.headers["content-type"] || "";
-
-        const match =
-          contentType.match(
-            /boundary=(?:"([^"]+)"|([^;]+))/i
-          );
-
-        if (!match) {
-          throw new Error(
-            "Multipart boundary not found"
-          );
-        }
-
-        const boundary =
-          match[1] || match[2];
-
-        const delimiter =
-          Buffer.from("--" + boundary);
-
-        const parts = [];
-
-        let start = 0;
-
-        while (true) {
-          const index =
-            buffer.indexOf(
-              delimiter,
-              start
-            );
-
-          if (index === -1) {
-            break;
-          }
-
-          if (index > start) {
-            parts.push(
-              buffer.slice(
-                start,
-                index
-              )
-            );
-          }
-
-          start =
-            index +
-            delimiter.length;
-        }
-
-        const fields = {};
-        const files = {};
-
-        for (let part of parts) {
-          if (!part.length) {
-            continue;
-          }
-
-          while (
-            part.length &&
-            (
-              part[0] === 13 ||
-              part[0] === 10
-            )
-          ) {
-            part = part.slice(1);
-          }
-
-          if (!part.length) {
-            continue;
-          }
-
-          const headerEnd =
-            part.indexOf(
-              Buffer.from("\r\n\r\n")
-            );
-
-          if (headerEnd === -1) {
-            continue;
-          }
-
-          const headerText =
-            part
-              .slice(0, headerEnd)
-              .toString("utf8");
-
-          let data =
-            part.slice(
-              headerEnd + 4
-            );
-
-          while (
-            data.length >= 2 &&
-            data[data.length - 2] === 13 &&
-            data[data.length - 1] === 10
-          ) {
-            data = data.slice(
-              0,
-              data.length - 2
-            );
-          }
-
-          const dispositionMatch =
-            headerText.match(
-              /name="([^"]+)"/i
-            );
-
-          if (!dispositionMatch) {
-            continue;
-          }
-
-          const fieldName =
-            dispositionMatch[1];
-
-          const fileMatch =
-            headerText.match(
-              /filename="([^"]*)"/i
-            );
-
-          if (fileMatch) {
-            const filename =
-              fileMatch[1];
-
-            const typeMatch =
-              headerText.match(
-                /Content-Type:\s*([^\r\n]+)/i
-              );
-
-            const mime =
-              typeMatch
-                ? typeMatch[1].trim()
-                : "application/octet-stream";
-
-            files[fieldName] = {
-              filename,
-              mime,
-              buffer: data
-            };
-          } else {
-            fields[fieldName] =
-              data.toString("utf8");
-          }
-        }
-
-        resolve({
-          fields,
-          files
-        });
-      } catch (error) {
-        reject(error);
-      }
-    });
-
-    req.on("error", reject);
-  });
-}
-
-function imageToDataUrl(file) {
-  if (!file || !file.buffer || !file.buffer.length) {
-    return "";
-  }
-
-  const allowed = [
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-    "image/gif"
-  ];
-
-  if (!allowed.includes(file.mime)) {
-    throw new Error(
-      "فرمت تصویر مجاز نیست."
-    );
-  }
-
-  if (file.buffer.length > 2 * 1024 * 1024) {
-    throw new Error(
-      "حجم تصویر باید کمتر از ۲ مگابایت باشد."
-    );
-  }
-
-  return `data:${file.mime};base64,${file.buffer.toString("base64")}`;
-}
-
-/* =========================================================
-   PAGE
-========================================================= */
 
 function page(title, content, user) {
   const nav = user
     ? `
-      <nav class="bottom-nav">
-        <a href="/">
-          <span>🏠</span>
-          خانه
-        </a>
+    <nav class="bottom-nav">
+      <a href="/">
+        <span>🏠</span>
+        خانه
+      </a>
 
-        <a href="/search">
-          <span>🔎</span>
-          جستجو
-        </a>
+      <a href="/search">
+        <span>🔎</span>
+        جستجو
+      </a>
 
-        <a href="/new-post">
-          <span>➕</span>
-          پست
-        </a>
+      <a href="/new-post">
+        <span>➕</span>
+        پست
+      </a>
 
-        <a href="/messages">
-          <span>💬</span>
-          پیام
-        </a>
+      <a href="/messages">
+        <span>💬</span>
+        پیام
+      </a>
 
-        <a href="/profile">
-          <span>👤</span>
-          پروفایل
-        </a>
-      </nav>
-    `
+      <a href="/profile">
+        <span>👤</span>
+        پروفایل
+      </a>
+    </nav>
+  `
     : "";
 
   const topMenu = user
     ? `
-      <div class="top-actions">
-        <a href="/jobs">💼 کاریابی</a>
-        <a href="/saved">🔖 ذخیره‌ها</a>
-        <a href="/notifications">🔔 اعلان‌ها</a>
-        <a href="/settings">⚙️ تنظیمات</a>
-        <a href="/logout">🚪 خروج</a>
-      </div>
-    `
+    <div class="top-actions">
+      <a href="/notifications">🔔 اعلان‌ها</a>
+      <a href="/jobs">💼 کاریابی</a>
+      <a href="/settings">⚙️ تنظیمات</a>
+      <a href="/logout">🚪 خروج</a>
+    </div>
+  `
     : "";
-
-  const avatar = user && user.avatar_url
-    ? `
-      <img
-        src="${escapeAttr(user.avatar_url)}"
-        alt="پروفایل"
-      >
-    `
-    : user
-      ? escapeHtml(
-          user.name
-            ? user.name.charAt(0)
-            : "👤"
-        )
-      : "";
 
   return `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
+
 <head>
 <meta charset="UTF-8">
 
@@ -535,12 +142,7 @@ function page(title, content, user) {
   content="width=device-width, initial-scale=1.0"
 >
 
-<meta
-  name="theme-color"
-  content="#6c5ce7"
->
-
-<title>${escapeHtml(title)} - MySocial</title>
+<title>${escapeHtml(title)}</title>
 
 <style>
 
@@ -548,725 +150,397 @@ function page(title, content, user) {
   box-sizing: border-box;
 }
 
-html {
-  scroll-behavior: smooth;
-}
-
 body {
   margin: 0;
-  font-family:
-    Tahoma,
-    Arial,
-    sans-serif;
-
-  background:
-    linear-gradient(
-      135deg,
-      #f5f7ff,
-      #eef3ff
-    );
-
+  background: #eef1f5;
   color: #202124;
-
-  padding-bottom: 90px;
+  font-family: Tahoma, Arial, sans-serif;
 }
 
-a {
-  color: inherit;
-  text-decoration: none;
+.app {
+  width: 100%;
+  max-width: 720px;
+  min-height: 100vh;
+  margin: auto;
+  background: #fff;
+  padding-bottom: ${user ? "90px" : "25px"};
 }
 
-header {
+.header {
   position: sticky;
   top: 0;
-  z-index: 50;
-
-  background:
-    rgba(255,255,255,.96);
-
-  backdrop-filter:
-    blur(12px);
-
-  border-bottom:
-    1px solid #e4e7f0;
-
-  box-shadow:
-    0 4px 20px rgba(60,60,120,.08);
-}
-
-.header-inner {
-  max-width: 820px;
-  margin: auto;
-  padding: 13px 14px;
-}
-
-.brand {
-  font-size: 24px;
-  font-weight: 900;
-  color: #5b4bdb;
-  margin-bottom: 10px;
-}
-
-.top-actions {
+  z-index: 30;
+  background: #fff;
+  border-bottom: 1px solid #e4e7eb;
+  padding: 13px 15px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
-.top-actions a {
-  background:
-    #f0efff;
-
-  color:
-    #5144b8;
-
-  padding:
-    8px 11px;
-
-  border-radius:
-    12px;
-
-  font-size:
-    12px;
-
-  font-weight:
-    bold;
-
-  transition:
-    .2s;
+.logo {
+  font-weight: 800;
+  font-size: 19px;
 }
 
-.top-actions a:hover {
-  background:
-    #dedbff;
-
-  transform:
-    translateY(-1px);
+.title {
+  font-size: 17px;
+  font-weight: 700;
 }
 
-main {
-  width: 100%;
-  max-width: 820px;
-  margin: 20px auto;
-  padding: 0 12px;
+.content {
+  padding: 14px;
 }
 
 .card {
-  background:
-    rgba(255,255,255,.98);
-
-  border:
-    1px solid #e1e4ef;
-
-  border-radius:
-    18px;
-
-  padding:
-    17px;
-
-  margin-bottom:
-    14px;
-
-  box-shadow:
-    0 7px 25px rgba(52,60,100,.07);
-}
-
-.card h2,
-.card h3 {
-  margin-top: 0;
+  background: #fff;
+  border: 1px solid #e1e5ea;
+  border-radius: 18px;
+  padding: 15px;
+  margin-bottom: 14px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.04);
 }
 
 .profile-head {
-  display:
-    flex;
-
-  align-items:
-    center;
-
-  gap:
-    12px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
 }
 
 .avatar {
-  width:
-    52px;
-
-  height:
-    52px;
-
-  border-radius:
-    50%;
-
-  background:
-    linear-gradient(
-      135deg,
-      #6c5ce7,
-      #00b894
-    );
-
-  color:
-    white;
-
-  display:
-    flex;
-
-  align-items:
-    center;
-
-  justify-content:
-    center;
-
-  font-weight:
-    bold;
-
-  font-size:
-    20px;
-
-  overflow:
-    hidden;
-
-  flex-shrink:
-    0;
-
-  box-shadow:
-    0 4px 12px
-    rgba(80,70,180,.25);
-}
-
-.avatar img {
-  width:
-    100%;
-
-  height:
-    100%;
-
-  object-fit:
-    cover;
-}
-
-.avatar.large {
-  width:
-    92px;
-
-  height:
-    92px;
-
-  font-size:
-    34px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #202124;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: bold;
+  flex: none;
 }
 
 .username {
-  font-weight:
-    bold;
-
-  font-size:
-    16px;
+  font-weight: 800;
+  font-size: 16px;
 }
 
-.email,
-.small {
-  color:
-    #777;
-
-  font-size:
-    12px;
-
-  margin-top:
-    4px;
+.email {
+  color: #777;
+  font-size: 12px;
+  margin-top: 4px;
+  direction: ltr;
+  text-align: right;
 }
 
 .post-text {
-  white-space:
-    pre-wrap;
-
-  line-height:
-    1.9;
-
-  margin-top:
-    15px;
-
-  overflow-wrap:
-    anywhere;
-}
-
-.post-image {
-  width:
-    100%;
-
-  max-height:
-    650px;
-
-  object-fit:
-    cover;
-
-  border-radius:
-    14px;
-
-  margin-top:
-    14px;
-
-  display:
-    block;
+  margin: 17px 0;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .stats {
-  display:
-    flex;
-
-  flex-wrap:
-    wrap;
-
-  gap:
-    16px;
-
-  color:
-    #666;
-
-  font-size:
-    13px;
-
-  margin-top:
-    14px;
+  display: flex;
+  gap: 14px;
+  color: #666;
+  font-size: 13px;
+  flex-wrap: wrap;
 }
 
 .actions {
-  display:
-    flex;
-
-  flex-wrap:
-    wrap;
-
-  gap:
-    8px;
-
-  margin-top:
-    14px;
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 12px;
 }
 
-button {
-  border:
-    0;
-
-  border-radius:
-    12px;
-
-  padding:
-    10px 14px;
-
-  cursor:
-    pointer;
-
-  background:
-    #ecebff;
-
-  color:
-    #4539a8;
-
-  font-size:
-    14px;
-
-  font-family:
-    inherit;
-
-  font-weight:
-    bold;
-
-  transition:
-    .2s;
+button,
+.btn {
+  border: 0;
+  border-radius: 11px;
+  padding: 11px 14px;
+  background: #202124;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  text-decoration: none;
+  display: inline-block;
 }
 
-button:hover {
-  transform:
-    translateY(-1px);
-
-  filter:
-    brightness(.97);
+button:hover,
+.btn:hover {
+  opacity: .9;
 }
 
-button.full {
-  width:
-    100%;
+.full {
+  width: 100%;
+  margin-top: 8px;
+  text-align: center;
 }
 
-button.danger {
-  background:
-    #ffe2e6;
-
-  color:
-    #c62828;
+.like {
+  background: #e91e63;
 }
 
-button.follow {
-  background:
-    #ddf7ef;
-
-  color:
-    #08795e;
+.follow {
+  background: #1976d2;
 }
 
-form {
-  display:
-    flex;
+.danger {
+  background: #b00020;
+}
 
-  flex-direction:
-    column;
-
-  gap:
-    12px;
+.green {
+  background: #087f23;
 }
 
 input,
 textarea {
-  width:
-    100%;
-
-  border:
-    1px solid #d8dbe7;
-
-  border-radius:
-    12px;
-
-  padding:
-    12px;
-
-  font-family:
-    inherit;
-
-  font-size:
-    14px;
-
-  background:
-    #fbfcff;
-
-  color:
-    #222;
-
-  outline:
-    none;
-}
-
-input:focus,
-textarea:focus {
-  border-color:
-    #6c5ce7;
-
-  box-shadow:
-    0 0 0 3px
-    rgba(108,92,231,.12);
+  width: 100%;
+  padding: 12px;
+  margin: 7px 0;
+  border: 1px solid #ccd2d9;
+  border-radius: 11px;
+  font-size: 16px;
+  font-family: Tahoma, Arial, sans-serif;
+  background: #fff;
 }
 
 textarea {
-  min-height:
-    120px;
-
-  resize:
-    vertical;
+  min-height: 120px;
+  resize: vertical;
 }
 
-input[type="file"] {
-  padding:
-    9px;
-
-  background:
-    #f5f4ff;
+a {
+  text-decoration: none;
+  color: inherit;
 }
 
-.error {
-  color:
-    #c62828;
-
-  font-weight:
-    bold;
+.top-actions {
+  display: flex;
+  gap: 7px;
+  overflow: auto;
+  padding: 0 14px 12px;
 }
 
-.success {
-  color:
-    #16845e;
+.top-actions a {
+  background: #f4f6f8;
+  border-radius: 10px;
+  padding: 8px 10px;
+  white-space: nowrap;
+  font-size: 12px;
+}
 
-  font-weight:
-    bold;
+.menu {
+  display: grid;
+  gap: 9px;
+}
+
+.menu a {
+  display: block;
 }
 
 .empty {
-  text-align:
-    center;
-
-  color:
-    #777;
+  text-align: center;
+  color: #777;
+  padding: 30px 10px;
 }
 
-.notice {
-  padding:
-    12px;
+.success {
+  color: #087f23;
+}
 
-  border-radius:
-    12px;
+.error {
+  color: #b00020;
+}
 
-  background:
-    #f4f3ff;
+.comment {
+  background: #f5f6f8;
+  border-radius: 12px;
+  padding: 10px;
+  margin-top: 8px;
+}
 
-  color:
-    #4f46a5;
-
-  margin-top:
-    10px;
+.comment-name {
+  font-weight: bold;
 }
 
 .comment-text {
-  white-space:
-    pre-wrap;
+  margin-top: 5px;
+  white-space: pre-wrap;
+}
 
-  line-height:
-    1.8;
-
-  margin-top:
-    10px;
+.job {
+  border: 1px solid #e0e4e8;
+  border-radius: 15px;
+  padding: 14px;
+  margin-bottom: 11px;
 }
 
 .job-title {
-  font-size:
-    18px;
-
-  font-weight:
-    bold;
+  font-size: 18px;
+  font-weight: 800;
 }
 
 .job-city,
 .job-salary {
-  margin-top:
-    8px;
+  margin-top: 7px;
+}
 
-  color:
-    #555;
+.job-salary {
+  color: #087f23;
 }
 
 .job-description {
-  white-space:
-    pre-wrap;
-
-  line-height:
-    1.8;
-
-  margin-top:
-    12px;
+  margin-top: 11px;
+  line-height: 1.8;
+  white-space: pre-wrap;
 }
 
-.message-card {
-  border-radius:
-    16px;
-
-  padding:
-    12px;
-
-  margin-bottom:
-    9px;
-
-  max-width:
-    86%;
+.post-image {
+  width: 100%;
+  max-height: 420px;
+  object-fit: cover;
+  border-radius: 14px;
+  margin-top: 10px;
 }
 
-.message-me {
-  background:
-    #e8e5ff;
-
-  color:
-    #30267e;
-
-  margin-right:
-    auto;
+.notice {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff8e1;
+  color: #795548;
+  margin-bottom: 12px;
 }
 
-.message-other {
-  background:
-    #eef2f5;
-
-  margin-left:
-    auto;
+.theme-btn {
+  background: #f4f6f8;
+  color: #202124;
 }
 
-.message-author {
-  font-size:
-    12px;
+.small {
+  font-size: 12px;
+  color: #777;
+}
 
-  font-weight:
-    bold;
-
-  margin-bottom:
-    5px;
+.divider {
+  height: 1px;
+  background: #e3e6e9;
+  margin: 18px 0;
 }
 
 .bottom-nav {
-  position:
-    fixed;
-
-  bottom:
-    0;
-
-  left:
-    0;
-
-  right:
-    0;
-
-  z-index:
-    100;
-
-  background:
-    rgba(255,255,255,.97);
-
-  backdrop-filter:
-    blur(12px);
-
-  border-top:
-    1px solid #ddd;
-
-  display:
-    flex;
-
-  justify-content:
-    center;
-
-  gap:
-    5px;
-
-  padding:
-    7px;
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 720px;
+  height: 67px;
+  background: #fff;
+  border-top: 1px solid #ddd;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  z-index: 50;
+  box-shadow: 0 -3px 12px rgba(0,0,0,.05);
 }
 
 .bottom-nav a {
-  flex:
-    1;
-
-  max-width:
-    150px;
-
-  text-align:
-    center;
-
-  font-size:
-    11px;
-
-  padding:
-    7px 3px;
-
-  border-radius:
-    12px;
-
-  color:
-    #555;
-}
-
-.bottom-nav a:hover {
-  background:
-    #f0efff;
-
-  color:
-    #5144b8;
+  text-align: center;
+  font-size: 11px;
+  color: #444;
+  min-width: 55px;
 }
 
 .bottom-nav span {
-  display:
-    block;
-
-  font-size:
-    19px;
-
-  margin-bottom:
-    2px;
+  display: block;
+  font-size: 21px;
+  margin-bottom: 2px;
 }
 
-.profile-cover {
-  height:
-    110px;
-
-  border-radius:
-    16px;
-
-  background:
-    linear-gradient(
-      135deg,
-      #6c5ce7,
-      #00b894
-    );
-
-  margin:
-    -2px -2px 15px;
+.hero {
+  padding: 8px 0 14px;
 }
 
-.profile-avatar-wrap {
-  margin-top:
-    -55px;
+.hero h1 {
+  margin: 5px 0 8px;
+  font-size: 23px;
+}
 
-  position:
-    relative;
-
-  z-index:
-    2;
+.hero p {
+  line-height: 1.8;
+  color: #666;
 }
 
 .badge {
-  display:
-    inline-block;
-
-  background:
-    #eeeaff;
-
-  color:
-    #5548c5;
-
-  padding:
-    5px 9px;
-
-  border-radius:
-    20px;
-
-  font-size:
-    11px;
-
-  font-weight:
-    bold;
+  display: inline-block;
+  background: #eef3ff;
+  color: #2455c3;
+  border-radius: 20px;
+  padding: 5px 9px;
+  font-size: 11px;
 }
 
-@media (max-width: 600px) {
+@media(max-width:480px) {
 
-  main {
-    margin-top:
-      12px;
+  .content {
+    padding: 10px;
   }
 
   .card {
-    border-radius:
-      14px;
-
-    padding:
-      14px;
+    border-radius: 15px;
   }
 
-  .top-actions {
-    gap:
-      5px;
+  .actions button,
+  .actions .btn {
+    padding: 10px 11px;
   }
 
-  .top-actions a {
-    font-size:
-      10px;
+}
 
-    padding:
-      7px 8px;
-  }
+body.dark {
+  background: #111;
+  color: #eee;
+}
 
-  button {
-    font-size:
-      13px;
+body.dark .app,
+body.dark .header,
+body.dark .bottom-nav,
+body.dark input,
+body.dark textarea {
+  background: #181818;
+  color: #eee;
+}
 
-    padding:
-      9px 11px;
-  }
+body.dark .card {
+  background: #1d1d1d;
+  border-color: #333;
+}
 
-  .message-card {
-    max-width:
-      92%;
-  }
+body.dark .top-actions a {
+  background: #292929;
+  color: #eee;
+}
+
+body.dark input,
+body.dark textarea {
+  border-color: #444;
+}
+
+body.dark .comment,
+body.dark .job {
+  background: #242424;
+  border-color: #3a3a3a;
+}
+
+body.dark .email,
+body.dark .small,
+body.dark .stats {
+  color: #aaa;
 }
 
 </style>
@@ -1274,85 +548,156 @@ input[type="file"] {
 
 <body>
 
-<header>
-  <div class="header-inner">
+<div class="app">
 
-    <div class="brand">
-      MySocial 📱
-    </div>
+<header class="header">
 
-    ${topMenu}
-
+  <div class="logo">
+    📱 برنامه اجتماعی
   </div>
+
+  <div class="title">
+    ${escapeHtml(title)}
+  </div>
+
 </header>
 
-<main>
+${topMenu}
 
-${content}
-
+<main class="content">
+  ${content}
 </main>
 
+</div>
+
 ${nav}
+
+<script>
+
+function toggleTheme() {
+  document.body.classList.toggle("dark");
+
+  localStorage.setItem(
+    "dark",
+    document.body.classList.contains("dark")
+  );
+}
+
+if (localStorage.getItem("dark") === "true") {
+  document.body.classList.add("dark");
+}
+
+</script>
 
 </body>
 </html>`;
 }
 
-/* =========================================================
-   DATABASE
-========================================================= */
+async function ensureColumn(table, column, definition) {
+  await pool.query(
+    \`ALTER TABLE ${table}
+     ADD COLUMN IF NOT EXISTS ${column} ${definition}\`
+  );
+}
 
 async function createTables() {
 
-  await pool.query(`
+  await pool.query(\`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
-      name VARCHAR(100) NOT NULL,
-      email VARCHAR(255) UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      bio TEXT DEFAULT '',
-      avatar_url TEXT DEFAULT '',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL
     )
-  `);
+  \`);
 
-  await pool.query(`
+  await pool.query(\`
     CREATE TABLE IF NOT EXISTS sessions (
-      id SERIAL PRIMARY KEY,
-      session_id VARCHAR(128) UNIQUE NOT NULL,
+      session_id TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-  `);
+  \`);
 
-  await pool.query(`
+  await pool.query(\`
     CREATE TABLE IF NOT EXISTS posts (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-      content TEXT NOT NULL,
-      image_url TEXT DEFAULT '',
+      content TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-  `);
+  \`);
 
-  await pool.query(`
+  // Compatibility with the older database that used posts.text.
+  await ensureColumn(
+    "posts",
+    "content",
+    "TEXT"
+  );
+
+  await ensureColumn(
+    "posts",
+    "image_url",
+    "TEXT"
+  );
+
+  try {
+
+    await pool.query(\`
+      UPDATE posts
+      SET content = text
+      WHERE
+        (content IS NULL OR content = '')
+        AND EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_name='posts'
+            AND column_name='text'
+        )
+    \`);
+
+    console.log(
+      "Old posts.text data copied to posts.content."
+    );
+
+  } catch (e) {
+
+    console.log(
+      "Old posts.text migration skipped."
+    );
+
+  }
+
+  await pool.query(
+    "UPDATE posts SET content = '' WHERE content IS NULL"
+  );
+
+  await pool.query(
+    "UPDATE posts SET content = '' WHERE content IS NULL"
+  );
+
+  await pool.query(
+    "ALTER TABLE posts ALTER COLUMN content SET NOT NULL"
+  );
+
+  await pool.query(\`
     CREATE TABLE IF NOT EXISTS likes (
       id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id)
-        ON DELETE CASCADE,
       post_id INTEGER NOT NULL
         REFERENCES posts(id)
         ON DELETE CASCADE,
-      UNIQUE(user_id, post_id)
+      user_id INTEGER NOT NULL
+        REFERENCES users(id)
+        ON DELETE CASCADE,
+      UNIQUE(post_id,user_id)
     )
-  `);
+  \`);
 
-  await pool.query(`
+  await pool.query(\`
     CREATE TABLE IF NOT EXISTS comments (
       id SERIAL PRIMARY KEY,
       post_id INTEGER NOT NULL
@@ -1364,9 +709,9 @@ async function createTables() {
       comment TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-  `);
+  \`);
 
-  await pool.query(`
+  await pool.query(\`
     CREATE TABLE IF NOT EXISTS follows (
       id SERIAL PRIMARY KEY,
       follower_id INTEGER NOT NULL
@@ -1375,11 +720,11 @@ async function createTables() {
       following_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-      UNIQUE(follower_id, following_id)
+      UNIQUE(follower_id,following_id)
     )
-  `);
+  \`);
 
-  await pool.query(`
+  await pool.query(\`
     CREATE TABLE IF NOT EXISTS jobs (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL
@@ -1391,18 +736,12 @@ async function createTables() {
       description TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-  `);
-
-  await pool.query(`
+  \`);       await pool.query(`
     CREATE TABLE IF NOT EXISTS messages (
       id SERIAL PRIMARY KEY,
-      sender_id INTEGER NOT NULL
-        REFERENCES users(id)
-        ON DELETE CASCADE,
-      receiver_id INTEGER NOT NULL
-        REFERENCES users(id)
-        ON DELETE CASCADE,
-      message TEXT,
+      sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      message TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -1410,126 +749,164 @@ async function createTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bookmarks (
       id SERIAL PRIMARY KEY,
-      post_id INTEGER NOT NULL
-        REFERENCES posts(id)
-        ON DELETE CASCADE,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id)
-        ON DELETE CASCADE,
+      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(post_id, user_id)
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS notifications (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id)
-        ON DELETE CASCADE,
-      actor_id INTEGER
-        REFERENCES users(id)
-        ON DELETE CASCADE,
-      type TEXT NOT NULL,
-      post_id INTEGER
-        REFERENCES posts(id)
-        ON DELETE CASCADE,
-      message TEXT NOT NULL,
-      is_read BOOLEAN DEFAULT FALSE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS reports (
-      id SERIAL PRIMARY KEY,
-      reporter_id INTEGER NOT NULL
-        REFERENCES users(id)
-        ON DELETE CASCADE,
-      reported_user_id INTEGER
-        REFERENCES users(id)
-        ON DELETE CASCADE,
-      post_id INTEGER
-        REFERENCES posts(id)
-        ON DELETE CASCADE,
-      reason TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      UNIQUE(post_id,user_id)
     )
   `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS blocked_users (
       id SERIAL PRIMARY KEY,
-      blocker_id INTEGER NOT NULL
-        REFERENCES users(id)
-        ON DELETE CASCADE,
-      blocked_id INTEGER NOT NULL
-        REFERENCES users(id)
-        ON DELETE CASCADE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(blocker_id, blocked_id)
+      blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE(blocker_id,blocked_id)
     )
   `);
 
-  /* =======================================================
-     MIGRATIONS
-  ======================================================= */
-
   await pool.query(`
-    ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS bio TEXT DEFAULT ''
+    CREATE TABLE IF NOT EXISTS reports (
+      id SERIAL PRIMARY KEY,
+      reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reported_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
+      reason TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
   `);
 
   await pool.query(`
-    ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS avatar_url TEXT DEFAULT ''
+    CREATE TABLE IF NOT EXISTS notifications (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      actor_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
+      message TEXT NOT NULL,
+      is_read BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await ensureColumn(
+    "notifications",
+    "message",
+    "TEXT"
+  );
+
+  await ensureColumn(
+    "notifications",
+    "is_read",
+    "BOOLEAN DEFAULT FALSE"
+  );
+
+  try {
+    await pool.query(`
+      DO $$
+      BEGIN
+
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_name='notifications'
+          AND column_name='read'
+        ) THEN
+
+          UPDATE notifications
+          SET is_read = read
+          WHERE is_read IS NULL;
+
+        END IF;
+
+      END
+      $$;
+    `);
+  } catch (e) {
+    console.log(
+      "Old notifications migration skipped."
+    );
+  }
+
+  await pool.query(`
+    UPDATE notifications
+    SET message=''
+    WHERE message IS NULL
   `);
 
   await pool.query(`
-    ALTER TABLE posts
-    ADD COLUMN IF NOT EXISTS image_url TEXT DEFAULT ''
+    UPDATE notifications
+    SET is_read=FALSE
+    WHERE is_read IS NULL
   `);
 
   await pool.query(`
-    ALTER TABLE messages
-    ADD COLUMN IF NOT EXISTS message TEXT
+    ALTER TABLE notifications
+    ALTER COLUMN message SET NOT NULL
   `);
 
-  /*
-   * نسخه‌های قدیمی ممکن است ستون content داشته باشند.
-   * اطلاعات قدیمی را به message منتقل می‌کنیم.
-   */
+  try {
 
-  await pool.query(`
-    DO $$
-    BEGIN
-      IF EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_name='messages'
-        AND column_name='content'
-      )
-      THEN
-        UPDATE messages
-        SET message = content
-        WHERE message IS NULL;
-      END IF;
-    END
-    $$;
-  `);
+    await pool.query(`
+      DO $$
+      BEGIN
+
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.tables
+          WHERE table_name='saved_posts'
+        ) THEN
+
+          INSERT INTO bookmarks(
+            user_id,
+            post_id
+          )
+          SELECT
+            user_id,
+            post_id
+          FROM saved_posts
+          ON CONFLICT DO NOTHING;
+
+        END IF;
+
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.tables
+          WHERE table_name='blocks'
+        ) THEN
+
+          INSERT INTO blocked_users(
+            blocker_id,
+            blocked_id
+          )
+          SELECT
+            blocker_id,
+            blocked_id
+          FROM blocks
+          ON CONFLICT DO NOTHING;
+
+        END IF;
+
+      END
+      $$;
+    `);
+
+  } catch (e) {
+
+    console.log(
+      "Legacy bookmark/block migration skipped."
+    );
+
+  }
 
   console.log(
-    "Database tables and migrations checked successfully."
+    "Database tables checked and repaired successfully."
   );
 }
 
-/* =========================================================
-   SESSION
-========================================================= */
-
 async function createSession(userId) {
 
-  const sessionId =
+  const id =
     crypto.randomBytes(32).toString("hex");
 
   await pool.query(
@@ -1541,67 +918,40 @@ async function createSession(userId) {
       VALUES($1,$2)
     `,
     [
-      sessionId,
+      id,
       userId
     ]
   );
 
-  return sessionId;
+  return id;
 }
 
 async function getSession(req) {
 
-  const cookies =
-    parseCookies(req);
+  const sid =
+    parseCookies(req).sessionId;
 
-  const sessionId =
-    cookies.sessionId;
-
-  if (!sessionId) {
+  if (!sid) {
     return null;
   }
 
-  const result =
+  const r =
     await pool.query(
       `
         SELECT
           users.id,
           users.name,
-          users.email,
-          users.bio,
-          users.avatar_url
+          users.email
         FROM sessions
         JOIN users
           ON users.id=sessions.user_id
         WHERE sessions.session_id=$1
       `,
-      [sessionId]
+      [sid]
     );
 
-  return result.rows[0] || null;
+  return r.rows[0] || null;
 }
-
-async function destroySession(req) {
-
-  const cookies =
-    parseCookies(req);
-
-  if (!cookies.sessionId) {
-    return;
-  }
-
-  await pool.query(
-    `
-      DELETE FROM sessions
-      WHERE session_id=$1
-    `,
-    [cookies.sessionId]
-  );
-}
-
-/* =========================================================
-   NOTIFICATION
-========================================================= */
 
 async function notify(
   userId,
@@ -1639,10 +989,6 @@ async function notify(
   );
 }
 
-/* =========================================================
-   SERVER
-========================================================= */
-
 const server =
   http.createServer(
     async (req, res) => {
@@ -1662,485 +1008,6 @@ const server =
           await getSession(req);
 
         /* ===================================================
-           HEALTH
-        =================================================== */
-
-        if (
-          req.method === "GET" &&
-          path === "/health"
-        ) {
-
-          sendJson(
-            res,
-            200,
-            {
-              ok: true,
-              service: "MySocial"
-            }
-          );
-
-          return;
-        }
-
-        /* ===================================================
-           LOGIN PAGE
-        =================================================== */
-
-        if (
-          req.method === "GET" &&
-          path === "/login"
-        ) {
-
-          if (user) {
-            redirect(res, "/");
-            return;
-          }
-
-          sendHtml(
-            res,
-            200,
-            "ورود",
-            `
-              <div class="card">
-
-                <h2>
-                  🔐 ورود به MySocial
-                </h2>
-
-                <form
-                  method="POST"
-                  action="/login"
-                >
-
-                  <input
-                    type="email"
-                    name="email"
-                    maxlength="255"
-                    placeholder="ایمیل"
-                    autocomplete="email"
-                    required
-                  >
-
-                  <input
-                    type="password"
-                    name="password"
-                    placeholder="رمز عبور"
-                    autocomplete="current-password"
-                    required
-                  >
-
-                  <button class="full">
-                    ورود
-                  </button>
-
-                </form>
-
-                <p>
-                  حساب نداری؟
-                  <a href="/register">
-                    <b>ثبت‌نام</b>
-                  </a>
-                </p>
-
-              </div>
-            `
-          );
-
-          return;
-        }
-
-        /* ===================================================
-           LOGIN POST
-        =================================================== */
-
-        if (
-          req.method === "POST" &&
-          path === "/login"
-        ) {
-
-          const data =
-            await readBody(req);
-
-          const email =
-            (data.get("email") || "")
-              .trim()
-              .toLowerCase();
-
-          const password =
-            data.get("password") || "";
-
-          if (
-            !email ||
-            !password
-          ) {
-
-            sendHtml(
-              res,
-              400,
-              "خطا",
-              `
-                <div class="card">
-                  <p class="error">
-                    ایمیل و رمز عبور را وارد کنید.
-                  </p>
-
-                  <a href="/login">
-                    بازگشت
-                  </a>
-                </div>
-              `
-            );
-
-            return;
-          }
-
-          const result =
-            await pool.query(
-              `
-                SELECT
-                  id,
-                  password
-                FROM users
-                WHERE LOWER(email)=LOWER($1)
-                LIMIT 1
-              `,
-              [email]
-            );
-
-          if (!result.rows.length) {
-
-            sendHtml(
-              res,
-              401,
-              "خطا",
-              `
-                <div class="card">
-                  <p class="error">
-                    ایمیل یا رمز عبور اشتباه است.
-                  </p>
-
-                  <a href="/login">
-                    تلاش دوباره
-                  </a>
-                </div>
-              `
-            );
-
-            return;
-          }
-
-          const account =
-            result.rows[0];
-
-          const valid =
-            await verifyPassword(
-              password,
-              account.password
-            );
-
-          if (!valid) {
-
-            sendHtml(
-              res,
-              401,
-              "خطا",
-              `
-                <div class="card">
-                  <p class="error">
-                    ایمیل یا رمز عبور اشتباه است.
-                  </p>
-
-                  <a href="/login">
-                    تلاش دوباره
-                  </a>
-                </div>
-              `
-            );
-
-            return;
-          }
-
-          if (
-            /^[a-f0-9]{64}$/i.test(
-              account.password
-            )
-          ) {
-
-            try {
-
-              const newHash =
-                await hashPasswordScrypt(
-                  password
-                );
-
-              await pool.query(
-                `
-                  UPDATE users
-                  SET password=$1
-                  WHERE id=$2
-                `,
-                [
-                  newHash,
-                  account.id
-                ]
-              );
-
-            } catch (error) {
-
-              console.error(
-                "PASSWORD MIGRATION ERROR:",
-                error
-              );
-            }
-          }
-
-          const sessionId =
-            await createSession(
-              account.id
-            );
-
-          redirect(
-            res,
-            "/",
-            `sessionId=${encodeURIComponent(
-              sessionId
-            )}; HttpOnly; Path=/; SameSite=Lax`
-          );
-
-          return;
-        }
-
-        /* ===================================================
-           REGISTER
-        =================================================== */
-
-        if (
-          req.method === "GET" &&
-          (
-            path === "/register" ||
-            path === "/signup"
-          )
-        ) {
-
-          if (user) {
-            redirect(res, "/");
-            return;
-          }
-
-          sendHtml(
-            res,
-            200,
-            "ثبت‌نام",
-            `
-              <div class="card">
-
-                <h2>
-                  📝 ساخت حساب
-                </h2>
-
-                <form
-                  method="POST"
-                  action="/register"
-                >
-
-                  <input
-                    name="name"
-                    maxlength="100"
-                    placeholder="نام"
-                    required
-                  >
-
-                  <input
-                    name="email"
-                    type="email"
-                    maxlength="255"
-                    placeholder="ایمیل"
-                    required
-                  >
-
-                  <input
-                    name="password"
-                    type="password"
-                    minlength="6"
-                    placeholder="رمز عبور، حداقل ۶ کاراکتر"
-                    required
-                  >
-
-                  <button class="full">
-                    ثبت‌نام
-                  </button>
-
-                </form>
-
-                <p>
-                  قبلاً حساب ساخته‌ای؟
-                  <a href="/login">
-                    <b>ورود</b>
-                  </a>
-                </p>
-
-              </div>
-            `
-          );
-
-          return;
-        }
-
-        if (
-          req.method === "POST" &&
-          (
-            path === "/register" ||
-            path === "/signup"
-          )
-        ) {
-
-          const data =
-            await readBody(req);
-
-          const name =
-            (data.get("name") || "")
-              .trim();
-
-          const email =
-            (data.get("email") || "")
-              .trim()
-              .toLowerCase();
-
-          const password =
-            data.get("password") || "";
-
-          if (
-            !name ||
-            !email ||
-            password.length < 6
-          ) {
-
-            sendHtml(
-              res,
-              400,
-              "خطا",
-              `
-                <div class="card">
-                  <p class="error">
-                    نام، ایمیل و رمز حداقل ۶ کاراکتری لازم است.
-                  </p>
-
-                  <a href="/register">
-                    بازگشت
-                  </a>
-                </div>
-              `
-            );
-
-            return;
-          }
-
-          try {
-
-            const passwordHash =
-              await hashPasswordScrypt(
-                password
-              );
-
-            const result =
-              await pool.query(
-                `
-                  INSERT INTO users(
-                    name,
-                    email,
-                    password
-                  )
-                  VALUES($1,$2,$3)
-                  RETURNING id
-                `,
-                [
-                  name,
-                  email,
-                  passwordHash
-                ]
-              );
-
-            const sessionId =
-              await createSession(
-                result.rows[0].id
-              );
-
-            redirect(
-              res,
-              "/",
-              `sessionId=${encodeURIComponent(
-                sessionId
-              )}; HttpOnly; Path=/; SameSite=Lax`
-            );
-
-          } catch (error) {
-
-            if (
-              error.code === "23505"
-            ) {
-
-              sendHtml(
-                res,
-                409,
-                "خطا",
-                `
-                  <div class="card">
-
-                    <p class="error">
-                      این ایمیل قبلاً ثبت شده است.
-                    </p>
-
-                    <a href="/login">
-                      ورود به حساب
-                    </a>
-
-                  </div>
-                `
-              );
-
-            } else {
-              throw error;
-            }
-          }
-
-          return;
-        }
-
-        /* ===================================================
-           LOGOUT
-        =================================================== */
-
-        if (
-          req.method === "GET" &&
-          path === "/logout"
-        ) {
-
-          await destroySession(req);
-
-          redirect(
-            res,
-            "/login",
-            "sessionId=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax"
-          );
-
-          return;
-        }
-
-        /* ===================================================
-           AUTH
-        =================================================== */
-
-        if (!user) {
-
-          redirect(
-            res,
-            "/login"
-          );
-
-          return;
-        }
-
-        /* ===================================================
            HOME
         =================================================== */
 
@@ -2149,70 +1016,103 @@ const server =
           path === "/"
         ) {
 
+          if (!user) {
+
+            sendHtml(
+              res,
+              200,
+              "خوش آمدید",
+              `
+                <div class="hero">
+
+                  <h1>
+                    یک جای مرتب برای ارتباط 👋
+                  </h1>
+
+                  <p>
+                    پست منتشر کن، کاربران را پیدا کن،
+                    پیام بده و آگهی کاری ببین.
+                  </p>
+
+                </div>
+
+                <div class="card menu">
+
+                  <a href="/signup">
+                    <button class="full">
+                      ثبت‌نام
+                    </button>
+                  </a>
+
+                  <a href="/login">
+                    <button class="full">
+                      ورود
+                    </button>
+                  </a>
+
+                </div>
+              `
+            );
+
+            return;
+          }
+
           const posts =
             await pool.query(
               `
                 SELECT
                   p.id,
-                  p.user_id,
                   p.content,
                   p.image_url,
                   p.created_at,
-
+                  u.id user_id,
                   u.name,
                   u.email,
-                  u.avatar_url,
 
                   (
                     SELECT COUNT(*)
                     FROM likes l
                     WHERE l.post_id=p.id
-                  ) AS like_count,
+                  ) like_count,
 
                   (
                     SELECT COUNT(*)
                     FROM comments c
                     WHERE c.post_id=p.id
-                  ) AS comment_count,
+                  ) comment_count,
 
                   EXISTS(
                     SELECT 1
-                    FROM likes ml
+                    FROM likes l2
                     WHERE
-                      ml.post_id=p.id
-                      AND ml.user_id=$1
-                  ) AS liked,
+                      l2.post_id=p.id
+                      AND l2.user_id=$1
+                  ) liked,
 
                   EXISTS(
                     SELECT 1
-                    FROM bookmarks mb
+                    FROM bookmarks b
                     WHERE
-                      mb.post_id=p.id
-                      AND mb.user_id=$1
-                  ) AS bookmarked
+                      b.post_id=p.id
+                      AND b.user_id=$1
+                  ) bookmarked
 
                 FROM posts p
 
                 JOIN users u
                   ON u.id=p.user_id
 
-                WHERE NOT EXISTS(
+                WHERE NOT EXISTS (
                   SELECT 1
-                  FROM blocked_users b
+                  FROM blocked_users bu
                   WHERE
-                    (
-                      b.blocker_id=$1
-                      AND b.blocked_id=p.user_id
-                    )
-                    OR
-                    (
-                      b.blocker_id=p.user_id
-                      AND b.blocked_id=$1
-                    )
+                    bu.blocker_id=$1
+                    AND bu.blocked_id=u.id
                 )
 
                 ORDER BY p.created_at DESC
-                LIMIT 100
+
+                LIMIT 50
               `,
               [user.id]
             );
@@ -2223,111 +1123,73 @@ const server =
               <div class="profile-head">
 
                 <div class="avatar">
-                  ${
-                    user.avatar_url
-                      ? `
-                        <img
-                          src="${escapeAttr(user.avatar_url)}"
-                          alt="پروفایل"
-                        >
-                      `
-                      : escapeHtml(
-                          user.name.charAt(0)
-                        )
-                  }
+                  ${escapeHtml(
+                    user.name.charAt(0)
+                  )}
                 </div>
 
                 <div>
-                  <h2 style="margin:0">
-                    سلام ${escapeHtml(user.name)} 👋
-                  </h2>
 
-                  <div class="small">
-                    به MySocial خوش آمدی
+                  <div class="username">
+                    خوش آمدی
+                    ${escapeHtml(user.name)}
+                    👋
                   </div>
+
+                  <div class="email">
+                    ${escapeHtml(user.email)}
+                  </div>
+
                 </div>
-
-              </div>
-
-              <div class="actions">
-
-                <a href="/new-post">
-                  <button>
-                    ➕ انتشار پست
-                  </button>
-                </a>
-
-                <a href="/search">
-                  <button>
-                    🔎 جستجو
-                  </button>
-                </a>
-
-                <a href="/saved">
-                  <button>
-                    🔖 ذخیره‌ها
-                  </button>
-                </a>
 
               </div>
 
             </div>
+
+            <a href="/new-post">
+              <button class="full">
+                ➕ انتشار پست جدید
+              </button>
+            </a>
+
+            <div class="divider"></div>
           `;
 
           if (!posts.rows.length) {
 
             html += `
               <div class="card empty">
-                هنوز پستی برای نمایش وجود ندارد.
+                هنوز پستی منتشر نشده است.
+                <br>
+                اولین پست را منتشر کن! 📸
               </div>
             `;
 
           } else {
 
-            for (const p of posts.rows) {
+            for (
+              const p of posts.rows
+            ) {
 
               html += `
                 <article class="card">
 
                   <div class="profile-head">
 
-                    <a href="/profile?id=${p.user_id}">
-
-                      <div class="avatar">
-
-                        ${
-                          p.avatar_url
-                            ? `
-                              <img
-                                src="${escapeAttr(p.avatar_url)}"
-                                alt="پروفایل"
-                              >
-                            `
-                            : escapeHtml(
-                                p.name.charAt(0)
-                              )
-                        }
-
-                      </div>
-
-                    </a>
+                    <div class="avatar">
+                      ${escapeHtml(
+                        p.name.charAt(0)
+                      )}
+                    </div>
 
                     <div>
 
-                      <a href="/profile?id=${p.user_id}">
-                        <div class="username">
-                          ${escapeHtml(p.name)}
-                        </div>
-                      </a>
+                      <div class="username">
+                        ${escapeHtml(p.name)}
+                      </div>
 
                       <div class="email">
                         ${escapeHtml(p.email)}
-                      </div>
-
-                      <div class="small">
-                        ${new Date(
-                          p.created_at
-                        ).toLocaleString("fa-IR")}
                       </div>
 
                     </div>
@@ -2338,19 +1200,8 @@ const server =
                     ${escapeHtml(p.content)}
                   </div>
 
-                  ${
-                    p.image_url
-                      ? `
-                        <img
-                          class="post-image"
-                          src="${escapeAttr(p.image_url)}"
-                          alt="تصویر پست"
-                        >
-                      `
-                      : ""
-                  }
-
                   <div class="stats">
+
                     <span>
                       ❤️ ${p.like_count}
                     </span>
@@ -2358,12 +1209,13 @@ const server =
                     <span>
                       💬 ${p.comment_count}
                     </span>
+
                   </div>
 
                   <div class="actions">
 
                     <a href="/like?post=${p.id}">
-                      <button>
+                      <button class="like">
                         ${
                           p.liked
                             ? "💔 برداشتن لایک"
@@ -2372,11 +1224,17 @@ const server =
                       </button>
                     </a>
 
+                    <a href="/post?id=${p.id}">
+                      <button>
+                        💬 نظرها
+                      </button>
+                    </a>
+
                     <a href="/bookmark?post=${p.id}">
                       <button>
                         ${
                           p.bookmarked
-                            ? "🔖 حذف ذخیره"
+                            ? "🔖 ذخیره‌شده"
                             : "🔖 ذخیره"
                         }
                       </button>
@@ -2384,27 +1242,9 @@ const server =
 
                     <a href="/post?id=${p.id}">
                       <button>
-                        💬 نظرات
+                        🔗 اشتراک
                       </button>
                     </a>
-
-                    <a href="/report?post=${p.id}&user=${p.user_id}">
-                      <button class="danger">
-                        🚩 گزارش
-                      </button>
-                    </a>
-
-                    ${
-                      p.user_id === user.id
-                        ? `
-                          <a href="/delete-post?id=${p.id}">
-                            <button class="danger">
-                              🗑️ حذف
-                            </button>
-                          </a>
-                        `
-                        : ""
-                    }
 
                   </div>
 
@@ -2425,6 +1265,314 @@ const server =
         }
 
         /* ===================================================
+           SIGNUP
+        =================================================== */
+
+        if (
+          req.method === "GET" &&
+          path === "/signup"
+        ) {
+
+          sendHtml(
+            res,
+            200,
+            "ثبت‌نام",
+            `
+              <div class="card">
+
+                <form
+                  method="POST"
+                  action="/signup"
+                >
+
+                  <input
+                    name="name"
+                    placeholder="نام"
+                    maxlength="100"
+                    required
+                  >
+
+                  <input
+                    name="email"
+                    type="email"
+                    placeholder="ایمیل"
+                    maxlength="200"
+                    required
+                  >
+
+                  <input
+                    name="password"
+                    type="password"
+                    placeholder="رمز عبور، حداقل ۶ کاراکتر"
+                    minlength="6"
+                    required
+                  >
+
+                  <button class="full">
+                    ثبت‌نام
+                  </button>
+
+                </form>
+
+              </div>
+
+              <a href="/">
+                بازگشت
+              </a>
+            `
+          );
+
+          return;
+        }
+
+        if (
+          req.method === "POST" &&
+          path === "/signup"
+        ) {
+
+          const d =
+            await readBody(req);
+
+          const name =
+            (d.get("name") || "")
+              .trim();
+
+          const email =
+            (d.get("email") || "")
+              .trim()
+              .toLowerCase();
+
+          const password =
+            d.get("password") || "";
+
+          if (
+            !name ||
+            !email ||
+            password.length < 6
+          ) {
+
+            sendHtml(
+              res,
+              400,
+              "خطا",
+              `
+                <p class="error">
+                  نام، ایمیل و رمز حداقل
+                  ۶ کاراکتری لازم است.
+                </p>
+              `
+            );
+
+            return;
+          }
+
+          try {
+
+            await pool.query(
+              `
+                INSERT INTO users(
+                  name,
+                  email,
+                  password
+                )
+                VALUES($1,$2,$3)
+              `,
+              [
+                name,
+                email,
+                hashPassword(password)
+              ]
+            );
+
+            sendHtml(
+              res,
+              200,
+              "ثبت‌نام موفق",
+              `
+                <div class="card">
+
+                  <h2 class="success">
+                    ثبت‌نام موفق شد ✅
+                  </h2>
+
+                  <a href="/login">
+                    <button class="full">
+                      ورود
+                    </button>
+                  </a>
+
+                </div>
+              `
+            );
+
+          } catch (e) {
+
+            sendHtml(
+              res,
+              400,
+              "خطا",
+              `
+                <p class="error">
+                  این ایمیل قبلاً ثبت شده است.
+                </p>
+
+                <a href="/signup">
+                  بازگشت
+                </a>
+              `
+            );
+
+          }
+
+          return;
+        }
+
+        /* ===================================================
+           LOGIN
+        =================================================== */
+
+        if (
+          req.method === "GET" &&
+          path === "/login"
+        ) {
+
+          sendHtml(
+            res,
+            200,
+            "ورود",
+            `
+              <div class="card">
+
+                <form
+                  method="POST"
+                  action="/login"
+                >
+
+                  <input
+                    name="email"
+                    type="email"
+                    placeholder="ایمیل"
+                    required
+                  >
+
+                  <input
+                    name="password"
+                    type="password"
+                    placeholder="رمز عبور"
+                    required
+                  >
+
+                  <button class="full">
+                    ورود
+                  </button>
+
+                </form>
+
+              </div>
+            `
+          );
+
+          return;
+        }
+
+        if (
+          req.method === "POST" &&
+          path === "/login"
+        ) {
+
+          const d =
+            await readBody(req);
+
+          const email =
+            (d.get("email") || "")
+              .trim()
+              .toLowerCase();
+
+          const password =
+            d.get("password") || "";
+
+          const r =
+            await pool.query(
+              `
+                SELECT
+                  id,
+                  name,
+                  email
+                FROM users
+                WHERE
+                  email=$1
+                  AND password=$2
+              `,
+              [
+                email,
+                hashPassword(password)
+              ]
+            );
+
+          if (!r.rows.length) {
+
+            sendHtml(
+              res,
+              401,
+              "خطا",
+              `
+                <p class="error">
+                  ایمیل یا رمز عبور اشتباه است.
+                </p>
+
+                <a href="/login">
+                  تلاش دوباره
+                </a>
+              `
+            );
+
+            return;
+          }
+
+          const sid =
+            await createSession(
+              r.rows[0].id
+            );
+
+          redirect(
+            res,
+            "/",
+            `sessionId=${encodeURIComponent(
+              sid
+            )}; HttpOnly; Path=/; SameSite=Lax`
+          );
+
+          return;
+        }
+
+        /* ===================================================
+           AUTHENTICATION
+        =================================================== */
+
+        if (!user) {
+
+          if (
+            ["/logout"].includes(path)
+          ) {
+
+            redirect(
+              res,
+              "/"
+            );
+
+          } else {
+
+            redirect(
+              res,
+              "/login"
+            );
+
+          }
+
+          return;
+        }
+
+        /* ===================================================
            NEW POST
         =================================================== */
 
@@ -2436,35 +1584,24 @@ const server =
           sendHtml(
             res,
             200,
-            "پست جدید",
+            "انتشار پست",
             `
               <div class="card">
-
-                <h2>
-                  ➕ انتشار پست جدید
-                </h2>
 
                 <form
                   method="POST"
                   action="/new-post"
-                  enctype="multipart/form-data"
                 >
 
                   <textarea
                     name="content"
-                    maxlength="10000"
+                    maxlength="5000"
                     placeholder="چه چیزی می‌خواهی منتشر کنی؟"
                     required
                   ></textarea>
 
-                  <input
-                    type="file"
-                    name="image"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
-                  >
-
                   <button class="full">
-                    📤 انتشار پست
+                    📸 انتشار
                   </button>
 
                 </form>
@@ -2482,46 +1619,16 @@ const server =
           path === "/new-post"
         ) {
 
-          const contentType =
-            req.headers["content-type"] || "";
+          const d =
+            await readBody(req);
 
-          let content = "";
-          let imageUrl = "";
+          const content =
+            (d.get("content") || "")
+              .trim();
 
-          if (
-            contentType.includes(
-              "multipart/form-data"
-            )
-          ) {
-
-            const form =
-              await readMultipart(req);
-
-            content =
-              String(
-                form.fields.content || ""
-              ).trim();
-
-            if (form.files.image) {
-              imageUrl =
-                imageToDataUrl(
-                  form.files.image
-                );
-            }
-
-          } else {
-
-            const data =
-              await readBody(req);
-
-            content =
-              (data.get("content") || "")
-                .trim();
-
-            imageUrl =
-              (data.get("image_url") || "")
-                .trim();
-          }
+          const imageUrl =
+            (d.get("image_url") || "")
+              .trim();
 
           if (!content) {
 
@@ -2530,11 +1637,9 @@ const server =
               400,
               "خطا",
               `
-                <div class="card">
-                  <p class="error">
-                    متن پست نمی‌تواند خالی باشد.
-                  </p>
-                </div>
+                <p class="error">
+                  متن پست خالی است.
+                </p>
               `,
               user
             );
@@ -2542,33 +1647,29 @@ const server =
             return;
           }
 
-          const result =
-            await pool.query(
-              `
-                INSERT INTO posts(
-                  user_id,
-                  content,
-                  image_url
-                )
-                VALUES($1,$2,$3)
-                RETURNING id
-              `,
-              [
-                user.id,
+          await pool.query(
+            `
+              INSERT INTO posts(
+                user_id,
                 content,
-                imageUrl
-              ]
-            );
+                image_url
+              )
+              VALUES($1,$2,$3)
+            `,
+            [
+              user.id,
+              content,
+              imageUrl || null
+            ]
+          );
 
           redirect(
             res,
-            `/post?id=${result.rows[0].id}`
+            "/"
           );
 
           return;
-        }
-
-        /* ===================================================
+        }       /* ===================================================
            LIKE
         =================================================== */
 
@@ -2582,14 +1683,15 @@ const server =
               url.searchParams.get("post")
             );
 
-          if (Number.isInteger(postId)) {
+          if (
+            Number.isInteger(postId)
+          ) {
 
             const x =
               await pool.query(
                 `
                   SELECT
                     p.user_id,
-
                     EXISTS(
                       SELECT 1
                       FROM likes
@@ -2597,7 +1699,6 @@ const server =
                         post_id=$1
                         AND user_id=$2
                     ) AS liked
-
                   FROM posts p
                   WHERE p.id=$1
                 `,
@@ -2648,8 +1749,11 @@ const server =
                   postId,
                   `${user.name} پست شما را پسندید.`
                 );
+
               }
+
             }
+
           }
 
           redirect(
@@ -2724,7 +1828,9 @@ const server =
                   user.id
                 ]
               );
+
             }
+
           }
 
           redirect(
@@ -2749,8 +1855,15 @@ const server =
               url.searchParams.get("id")
             );
 
-          if (!Number.isInteger(postId)) {
-            redirect(res, "/");
+          if (
+            !Number.isInteger(postId)
+          ) {
+
+            redirect(
+              res,
+              "/"
+            );
+
             return;
           }
 
@@ -2809,7 +1922,9 @@ const server =
               ]
             );
 
-          if (!result.rows.length) {
+          if (
+            !result.rows.length
+          ) {
 
             sendHtml(
               res,
@@ -2866,7 +1981,9 @@ const server =
                       post.avatar_url
                         ? `
                           <img
-                            src="${escapeAttr(post.avatar_url)}"
+                            src="${escapeAttr(
+                              post.avatar_url
+                            )}"
                             alt="پروفایل"
                           >
                         `
@@ -2882,9 +1999,11 @@ const server =
                 <div>
 
                   <a href="/profile?id=${post.user_id}">
+
                     <div class="username">
                       ${escapeHtml(post.name)}
                     </div>
+
                   </a>
 
                   <div class="email">
@@ -2910,7 +2029,9 @@ const server =
                   ? `
                     <img
                       class="post-image"
-                      src="${escapeAttr(post.image_url)}"
+                      src="${escapeAttr(
+                        post.image_url
+                      )}"
                       alt="تصویر پست"
                     >
                   `
@@ -2918,6 +2039,7 @@ const server =
               }
 
               <div class="stats">
+
                 <span>
                   ❤️ ${post.like_count}
                 </span>
@@ -2925,6 +2047,7 @@ const server =
                 <span>
                   💬 ${post.comment_count}
                 </span>
+
               </div>
 
               <div class="actions">
@@ -3010,7 +2133,9 @@ const server =
             </div>
           `;
 
-          if (!comments.rows.length) {
+          if (
+            !comments.rows.length
+          ) {
 
             html += `
               <div class="card empty">
@@ -3020,7 +2145,9 @@ const server =
 
           } else {
 
-            for (const c of comments.rows) {
+            for (
+              const c of comments.rows
+            ) {
 
               html += `
                 <div class="card">
@@ -3035,7 +2162,9 @@ const server =
                           c.avatar_url
                             ? `
                               <img
-                                src="${escapeAttr(c.avatar_url)}"
+                                src="${escapeAttr(
+                                  c.avatar_url
+                                )}"
                                 alt="پروفایل"
                               >
                             `
@@ -3051,9 +2180,11 @@ const server =
                     <div>
 
                       <a href="/profile?id=${c.user_id}">
+
                         <div class="username">
                           ${escapeHtml(c.name)}
                         </div>
+
                       </a>
 
                       <div class="small">
@@ -3118,9 +2249,11 @@ const server =
               "خطا",
               `
                 <div class="card">
+
                   <p class="error">
                     اطلاعات نظر معتبر نیست.
                   </p>
+
                 </div>
               `,
               user
@@ -3139,7 +2272,9 @@ const server =
               [postId]
             );
 
-          if (!post.rows.length) {
+          if (
+            !post.rows.length
+          ) {
 
             sendHtml(
               res,
@@ -3147,9 +2282,11 @@ const server =
               "خطا",
               `
                 <div class="card">
+
                   <p class="error">
                     پست پیدا نشد.
                   </p>
+
                 </div>
               `,
               user
@@ -3220,7 +2357,9 @@ const server =
               [profileId]
             );
 
-          if (!r.rows.length) {
+          if (
+            !r.rows.length
+          ) {
 
             sendHtml(
               res,
@@ -3228,9 +2367,11 @@ const server =
               "کاربر پیدا نشد",
               `
                 <div class="card">
+
                   <p class="error">
                     کاربر پیدا نشد.
                   </p>
+
                 </div>
               `,
               user
@@ -3321,7 +2462,9 @@ const server =
                     profile.avatar_url
                       ? `
                         <img
-                          src="${escapeAttr(profile.avatar_url)}"
+                          src="${escapeAttr(
+                            profile.avatar_url
+                          )}"
                           alt="تصویر پروفایل"
                         >
                       `
@@ -3374,11 +2517,13 @@ const server =
                 profileId === user.id
                   ? `
                     <div class="actions">
+
                       <a href="/settings">
                         <button>
                           ⚙️ ویرایش پروفایل
                         </button>
                       </a>
+
                     </div>
                   `
                   : `
@@ -3417,7 +2562,9 @@ const server =
             </div>
           `;
 
-          if (!posts.rows.length) {
+          if (
+            !posts.rows.length
+          ) {
 
             html += `
               <div class="card empty">
@@ -3427,7 +2574,9 @@ const server =
 
           } else {
 
-            for (const p of posts.rows) {
+            for (
+              const p of posts.rows
+            ) {
 
               html += `
                 <div class="card">
@@ -3447,7 +2596,9 @@ const server =
                       ? `
                         <img
                           class="post-image"
-                          src="${escapeAttr(p.image_url)}"
+                          src="${escapeAttr(
+                            p.image_url
+                          )}"
                           alt="تصویر پست"
                         >
                       `
@@ -3490,9 +2641,7 @@ const server =
           );
 
           return;
-        }
-
-        /* ===================================================
+        }   /* ===================================================
            FOLLOW
         =================================================== */
 
@@ -3510,12 +2659,7 @@ const server =
             !Number.isInteger(targetId) ||
             targetId === user.id
           ) {
-
-            redirect(
-              res,
-              "/"
-            );
-
+            redirect(res, "/");
             return;
           }
 
@@ -3557,12 +2701,10 @@ const server =
             );
 
           if (blocked.rows.length) {
-
             redirect(
               res,
               `/profile?id=${targetId}`
             );
-
             return;
           }
 
@@ -3620,6 +2762,7 @@ const server =
               null,
               `${user.name} شما را دنبال کرد.`
             );
+
           }
 
           redirect(
@@ -3694,7 +2837,9 @@ const server =
                 ]
               );
 
-            if (!results.rows.length) {
+            if (
+              !results.rows.length
+            ) {
 
               html += `
                 <div class="card empty">
@@ -3704,7 +2849,9 @@ const server =
 
             } else {
 
-              for (const u of results.rows) {
+              for (
+                const u of results.rows
+              ) {
 
                 html += `
                   <div class="card">
@@ -3717,7 +2864,9 @@ const server =
                           u.avatar_url
                             ? `
                               <img
-                                src="${escapeAttr(u.avatar_url)}"
+                                src="${escapeAttr(
+                                  u.avatar_url
+                                )}"
                                 alt="تصویر"
                               >
                             `
@@ -3875,12 +3024,6 @@ const server =
               return;
             }
 
-            /*
-             * این کوئری عمداً فقط از m.message استفاده می‌کند.
-             * migration بالا ستون message را برای دیتابیس‌های
-             * قدیمی هم ایجاد می‌کند.
-             */
-
             const messages =
               await pool.query(
                 `
@@ -3975,7 +3118,9 @@ const server =
 
             } else {
 
-              for (const m of messages.rows) {
+              for (
+                const m of messages.rows
+              ) {
 
                 const mine =
                   Number(m.sender_id) ===
@@ -4053,10 +3198,6 @@ const server =
             return;
           }
 
-          /*
-           * لیست گفتگوها
-           */
-
           const contacts =
             await pool.query(
               `
@@ -4069,7 +3210,6 @@ const server =
                 FROM users u
 
                 WHERE u.id IN(
-
                   SELECT receiver_id
                   FROM messages
                   WHERE sender_id=$1
@@ -4079,7 +3219,6 @@ const server =
                   SELECT sender_id
                   FROM messages
                   WHERE receiver_id=$1
-
                 )
 
                 ORDER BY u.name
@@ -4117,7 +3256,9 @@ const server =
 
           } else {
 
-            for (const c of contacts.rows) {
+            for (
+              const c of contacts.rows
+            ) {
 
               html += `
                 <div class="card">
@@ -4130,7 +3271,9 @@ const server =
                         c.avatar_url
                           ? `
                             <img
-                              src="${escapeAttr(c.avatar_url)}"
+                              src="${escapeAttr(
+                                c.avatar_url
+                              )}"
                               alt="پروفایل"
                             >
                           `
@@ -4365,7 +3508,9 @@ const server =
             </div>
           `;
 
-          if (!notifications.rows.length) {
+          if (
+            !notifications.rows.length
+          ) {
 
             html += `
               <div class="card empty">
@@ -4390,7 +3535,9 @@ const server =
                         n.actor_avatar
                           ? `
                             <img
-                              src="${escapeAttr(n.actor_avatar)}"
+                              src="${escapeAttr(
+                                n.actor_avatar
+                              )}"
                               alt="پروفایل"
                             >
                           `
@@ -4454,7 +3601,6 @@ const server =
                   p.content,
                   p.image_url,
                   p.created_at,
-
                   u.id AS user_id,
                   u.name,
                   u.email,
@@ -4512,7 +3658,9 @@ const server =
                         p.avatar_url
                           ? `
                             <img
-                              src="${escapeAttr(p.avatar_url)}"
+                              src="${escapeAttr(
+                                p.avatar_url
+                              )}"
                               alt="پروفایل"
                             >
                           `
@@ -4552,7 +3700,9 @@ const server =
                       ? `
                         <img
                           class="post-image"
-                          src="${escapeAttr(p.image_url)}"
+                          src="${escapeAttr(
+                            p.image_url
+                          )}"
                           alt="تصویر"
                         >
                       `
@@ -4742,17 +3892,14 @@ const server =
             `,
             [
               user.id,
-
               Number.isInteger(
                 reportedUserId
               )
                 ? reportedUserId
                 : null,
-
               Number.isInteger(postId)
                 ? postId
                 : null,
-
               reason
             ]
           );
@@ -4893,6 +4040,7 @@ const server =
                 targetId
               ]
             );
+
           }
 
           redirect(
@@ -4923,7 +4071,6 @@ const server =
                   j.salary,
                   j.description,
                   j.created_at,
-
                   u.name,
                   u.email
 
@@ -5309,6 +4456,7 @@ const server =
 
           let name = "";
           let bio = "";
+
           let avatarUrl =
             user.avatar_url || "";
 
@@ -5440,6 +4588,7 @@ const server =
                 user.id
               ]
             );
+
           }
 
           redirect(
@@ -5480,12 +4629,51 @@ const server =
                 user.id
               ]
             );
+
           }
 
           redirect(
             res,
             "/jobs"
           );
+
+          return;
+        }
+
+        /* ===================================================
+           LOGOUT
+        =================================================== */
+
+        if (
+          req.method === "GET" &&
+          path === "/logout"
+        ) {
+
+          const sid =
+            parseCookies(req).sessionId;
+
+          if (sid) {
+
+            await pool.query(
+              `
+                DELETE FROM sessions
+                WHERE session_id=$1
+              `,
+              [sid]
+            );
+
+          }
+
+          res.writeHead(
+            302,
+            {
+              "Set-Cookie":
+                "sessionId=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax",
+              "Location": "/"
+            }
+          );
+
+          res.end();
 
           return;
         }
@@ -5596,6 +4784,7 @@ async function startServer() {
     );
 
     process.exit(1);
+
   }
 }
 
