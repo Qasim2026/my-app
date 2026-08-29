@@ -1,28 +1,31 @@
 const http = require("http");
 const crypto = require("crypto");
-const util = require("util");
 const { Pool } = require("pg");
 
-const scryptAsync = util.promisify(crypto.scrypt);
-
-const PORT = Number(process.env.PORT || 10000);
+const PORT = process.env.PORT || 10000;
 const DATABASE_URL = process.env.DATABASE_URL;
 
 if (!DATABASE_URL) {
-  console.error("خطا: DATABASE_URL تنظیم نشده است.");
+  console.error("STARTUP ERROR: DATABASE_URL is not set.");
   process.exit(1);
 }
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
+  ssl: { rejectUnauthorized: false },
+  connectionTimeoutMillis: 10000
 });
 
 /* =========================================================
-   HELPERS
+   SECURITY / HELPERS
 ========================================================= */
+
+function hashPassword(password) {
+  return crypto
+    .createHash("sha256")
+    .update(String(password))
+    .digest("hex");
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -39,22 +42,47 @@ function escapeAttr(value) {
 
 function parseCookies(req) {
   const cookies = {};
-  const raw = req.headers.cookie || "";
+  const header = req.headers.cookie || "";
 
-  raw.split(";").forEach(part => {
+  header.split(";").forEach(part => {
     const index = part.indexOf("=");
 
-    if (index === -1) return;
+    if (index < 0) {
+      return;
+    }
 
     const key = part.slice(0, index).trim();
     const value = part.slice(index + 1).trim();
 
-    if (key) {
+    try {
       cookies[key] = decodeURIComponent(value);
+    } catch {
+      cookies[key] = value;
     }
   });
 
   return cookies;
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+
+    req.on("data", chunk => {
+      body += chunk;
+
+      if (body.length > 2 * 1024 * 1024) {
+        reject(new Error("Request body too large"));
+        req.destroy();
+      }
+    });
+
+    req.on("end", () => {
+      resolve(new URLSearchParams(body));
+    });
+
+    req.on("error", reject);
+  });
 }
 
 function redirect(res, location, cookie) {
@@ -70,37 +98,70 @@ function redirect(res, location, cookie) {
   res.end();
 }
 
-function sendHtml(res, status, title, body, user = null) {
+function sendHtml(res, status, title, content, user = null) {
+  if (res.headersSent) {
+    return;
+  }
+
+  res.writeHead(status, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff"
+  });
+
+  res.end(
+    page(
+      title,
+      content,
+      user
+    )
+  );
+}
+
+function page(title, content, user) {
   const nav = user
     ? `
-      <nav class="nav">
+      <nav class="bottom-nav">
 
         <a href="/">
-          🏠 خانه
+          <span>🏠</span>
+          خانه
         </a>
 
         <a href="/search">
-          🔎 جستجو
+          <span>🔎</span>
+          جستجو
+        </a>
+
+        <a href="/new-post">
+          <span>➕</span>
+          پست
         </a>
 
         <a href="/messages">
-          💬 پیام‌ها
+          <span>💬</span>
+          پیام
         </a>
+
+        <a href="/profile">
+          <span>👤</span>
+          پروفایل
+        </a>
+
+      </nav>
+    `
+    : "";
+
+  const topMenu = user
+    ? `
+      <div class="top-actions">
 
         <a href="/notifications">
           🔔 اعلان‌ها
         </a>
 
-        <a href="/saved">
-          🔖 ذخیره‌ها
-        </a>
-
         <a href="/jobs">
           💼 کاریابی
-        </a>
-
-        <a href="/profile">
-          👤 پروفایل
         </a>
 
         <a href="/settings">
@@ -111,609 +172,556 @@ function sendHtml(res, status, title, body, user = null) {
           🚪 خروج
         </a>
 
-      </nav>
+      </div>
     `
     : "";
 
-  const html = `
-<!DOCTYPE html>
-<html lang="fa" dir="rtl">
+  return `<!DOCTYPE html>
+
+<html
+  lang="fa"
+  dir="rtl"
+>
+
 <head>
 
-  <meta charset="UTF-8">
+<meta charset="UTF-8">
 
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
-  >
+<meta
+  name="viewport"
+  content="width=device-width, initial-scale=1.0"
+>
 
-  <title>${escapeHtml(title)} - MySocial</title>
+<meta
+  name="theme-color"
+  content="#202124"
+>
 
-  <style>
+<title>${escapeHtml(title)}</title>
 
-    * {
-      box-sizing: border-box;
-    }
+<style>
 
-    body {
-      margin: 0;
-      background: #f3f4f6;
-      color: #172033;
-      font-family:
-        Tahoma,
-        Arial,
-        sans-serif;
-      line-height: 1.8;
-    }
+* {
+  box-sizing: border-box;
+}
 
-    a {
-      color: inherit;
-      text-decoration: none;
-    }
+html {
+  scroll-behavior: smooth;
+}
 
-    .container {
-      width: min(900px, calc(100% - 24px));
-      margin: 20px auto 50px;
-    }
+body {
+  margin: 0;
+  background: #eef1f5;
+  color: #202124;
+  font-family: Tahoma, Arial, sans-serif;
+}
 
-    .top {
-      background: #111827;
-      color: white;
-      padding: 16px;
-      border-radius: 18px;
-      margin-bottom: 15px;
-    }
+.app {
+  width: 100%;
+  max-width: 720px;
+  min-height: 100vh;
+  margin: auto;
+  background: #fff;
+  padding-bottom: ${user ? "90px" : "25px"};
+}
 
-    .brand {
-      font-size: 25px;
-      font-weight: 900;
-    }
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: #fff;
+  border-bottom: 1px solid #e4e7eb;
+  padding: 13px 15px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
 
-    .brand-small {
-      font-size: 13px;
-      opacity: .75;
-    }
+.logo {
+  font-weight: 800;
+  font-size: 18px;
+}
 
-    .nav {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 14px;
-    }
+.title {
+  font-size: 16px;
+  font-weight: 700;
+}
 
-    .nav a {
-      background: #263247;
-      padding: 7px 11px;
-      border-radius: 10px;
-      font-size: 13px;
-    }
+.content {
+  padding: 14px;
+}
 
-    .card {
-      background: white;
-      border-radius: 18px;
-      padding: 18px;
-      margin: 12px 0;
-      box-shadow:
-        0 3px 15px rgba(0,0,0,.06);
-    }
+.card {
+  background: #fff;
+  border: 1px solid #e1e5ea;
+  border-radius: 18px;
+  padding: 15px;
+  margin-bottom: 14px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.04);
+}
 
-    .hero {
-      background: white;
-      border-radius: 20px;
-      padding: 28px 20px;
-      margin-bottom: 15px;
-      text-align: center;
-    }
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
 
-    .hero h1 {
-      margin-top: 0;
-    }
+.avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #202124;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 21px;
+  font-weight: bold;
+  flex: none;
+  overflow: hidden;
+}
 
-    input,
-    textarea,
-    select {
-      width: 100%;
-      border: 1px solid #d6dbe5;
-      border-radius: 12px;
-      padding: 12px;
-      margin: 6px 0 12px;
-      font: inherit;
-      background: white;
-    }
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 
-    textarea {
-      min-height: 130px;
-      resize: vertical;
-    }
+.avatar.large {
+  width: 100px;
+  height: 100px;
+  font-size: 36px;
+  margin: auto;
+}
 
-    button {
-      border: 0;
-      border-radius: 11px;
-      padding: 10px 15px;
-      cursor: pointer;
-      background: #e8edf5;
-      color: #111827;
-      font: inherit;
-      font-weight: 700;
-    }
+.profile-cover {
+  height: 110px;
+  border-radius: 15px;
+  background: linear-gradient(
+    135deg,
+    #202124,
+    #555
+  );
+}
 
-    button:hover {
-      opacity: .88;
-    }
+.profile-avatar-wrap {
+  margin-top: -50px;
+  position: relative;
+  z-index: 2;
+}
 
-    .full {
-      width: 100%;
-      background: #111827;
-      color: white;
-      margin-top: 5px;
-    }
+.username {
+  font-weight: 800;
+  font-size: 16px;
+}
 
-    .danger {
-      background: #b42318;
-      color: white;
-    }
+.email {
+  color: #777;
+  font-size: 12px;
+  margin-top: 4px;
+  direction: ltr;
+  text-align: right;
+  word-break: break-all;
+}
 
-    .follow {
-      background: #166534;
-      color: white;
-    }
+.post-text {
+  margin: 17px 0;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
-    .like {
-      background: #fee2e2;
-    }
+.comment-text {
+  margin-top: 7px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 13px;
-    }
+.stats {
+  display: flex;
+  gap: 14px;
+  color: #666;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
 
-    .profile-head {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
+.actions {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
 
-    .avatar {
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      background: #111827;
-      color: white;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      font-weight: 900;
-      flex-shrink: 0;
-    }
+button,
+.btn {
+  border: 0;
+  border-radius: 11px;
+  padding: 11px 14px;
+  background: #202124;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  text-decoration: none;
+  display: inline-block;
+}
 
-    .avatar.large {
-      width: 100px;
-      height: 100px;
-      font-size: 35px;
-      margin: auto;
-    }
+button:hover,
+.btn:hover {
+  opacity: .9;
+}
 
-    .avatar img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
+.full {
+  width: 100%;
+  margin-top: 8px;
+  text-align: center;
+}
 
-    .username {
-      font-weight: 900;
-      font-size: 17px;
-    }
+.like {
+  background: #e91e63;
+}
 
-    .email {
-      color: #64748b;
-      font-size: 13px;
-      direction: ltr;
-      text-align: right;
-    }
+.follow {
+  background: #1976d2;
+}
 
-    .small {
-      color: #64748b;
-      font-size: 12px;
-    }
+.danger {
+  background: #b00020;
+}
 
-    .post-text {
-      white-space: pre-wrap;
-      word-break: break-word;
-      margin-top: 15px;
-    }
+.green {
+  background: #087f23;
+}
 
-    .post-image {
-      width: 100%;
-      max-height: 650px;
-      object-fit: contain;
-      border-radius: 14px;
-      margin-top: 15px;
-      background: #f1f5f9;
-    }
+input,
+textarea {
+  width: 100%;
+  padding: 12px;
+  margin: 7px 0;
+  border: 1px solid #ccd2d9;
+  border-radius: 11px;
+  font-size: 16px;
+  font-family: Tahoma, Arial, sans-serif;
+  background: #fff;
+}
 
-    .stats {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 20px;
-      margin-top: 15px;
-      color: #475569;
-      font-size: 14px;
-    }
+textarea {
+  min-height: 120px;
+  resize: vertical;
+}
 
-    .divider {
-      height: 1px;
-      background: #dce1e8;
-      margin: 18px 0;
-    }
+input[type="file"] {
+  padding: 9px;
+}
 
-    .empty {
-      text-align: center;
-      color: #64748b;
-    }
+a {
+  text-decoration: none;
+  color: inherit;
+}
 
-    .error {
-      color: #b42318;
-      font-weight: 700;
-    }
+.top-actions {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  padding: 0 14px 12px;
+}
 
-    .success {
-      color: #15803d;
-    }
+.top-actions a {
+  background: #f4f6f8;
+  border-radius: 10px;
+  padding: 8px 10px;
+  white-space: nowrap;
+  font-size: 12px;
+}
 
-    .notice {
-      background: #f1f5f9;
-      border-radius: 10px;
-      padding: 10px;
-      font-size: 13px;
-      margin-bottom: 10px;
-    }
+.menu {
+  display: grid;
+  gap: 9px;
+}
 
-    .message-card {
-      max-width: 78%;
-      padding: 13px;
-      margin: 9px 0;
-      border-radius: 15px;
-    }
+.menu a {
+  display: block;
+}
 
-    .message-me {
-      margin-right: auto;
-      background: #dbeafe;
-    }
+.empty {
+  text-align: center;
+  color: #777;
+  padding: 30px 10px;
+}
 
-    .message-other {
-      margin-left: auto;
-      background: #ffffff;
-      box-shadow: 0 2px 10px rgba(0,0,0,.06);
-    }
+.success {
+  color: #087f23;
+}
 
-    .message-author {
-      font-size: 12px;
-      font-weight: 900;
-    }
+.error {
+  color: #b00020;
+}
 
-    .profile-cover {
-      height: 130px;
-      border-radius: 15px;
-      background:
-        linear-gradient(
-          135deg,
-          #111827,
-          #475569
-        );
-    }
+.comment {
+  background: #f5f6f8;
+  border-radius: 12px;
+  padding: 10px;
+  margin-top: 8px;
+}
 
-    .profile-avatar-wrap {
-      margin-top: -50px;
-      position: relative;
-    }
+.comment-name {
+  font-weight: bold;
+}
 
-    .job-title {
-      font-size: 20px;
-      font-weight: 900;
-    }
+.job {
+  border: 1px solid #e0e4e8;
+  border-radius: 15px;
+  padding: 14px;
+  margin-bottom: 11px;
+}
 
-    .job-city,
-    .job-salary,
-    .job-description {
-      margin-top: 8px;
-    }
+.job-title {
+  font-size: 18px;
+  font-weight: 800;
+}
 
-    .footer {
-      text-align: center;
-      color: #94a3b8;
-      font-size: 12px;
-      margin-top: 30px;
-    }
+.job-city,
+.job-salary {
+  margin-top: 7px;
+}
 
-    @media(max-width:600px) {
+.job-salary {
+  color: #087f23;
+}
 
-      .container {
-        width: calc(100% - 14px);
-        margin-top: 8px;
-      }
+.job-description {
+  margin-top: 11px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
 
-      .card {
-        padding: 14px;
-        border-radius: 15px;
-      }
+.post-image {
+  width: 100%;
+  max-height: 500px;
+  object-fit: cover;
+  border-radius: 14px;
+  margin-top: 10px;
+}
 
-      .actions button {
-        font-size: 13px;
-      }
+.notice {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff8e1;
+  color: #795548;
+  margin-bottom: 12px;
+}
 
-      .message-card {
-        max-width: 90%;
-      }
+.theme-btn {
+  background: #f4f6f8;
+  color: #202124;
+}
 
-    }
+.small {
+  font-size: 12px;
+  color: #777;
+}
 
-  </style>
+.divider {
+  height: 1px;
+  background: #e3e6e9;
+  margin: 18px 0;
+}
+
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 720px;
+  height: 67px;
+  background: #fff;
+  border-top: 1px solid #ddd;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  z-index: 50;
+  box-shadow: 0 -3px 12px rgba(0,0,0,.05);
+}
+
+.bottom-nav a {
+  text-align: center;
+  font-size: 11px;
+  color: #444;
+  min-width: 55px;
+}
+
+.bottom-nav span {
+  display: block;
+  font-size: 21px;
+  margin-bottom: 2px;
+}
+
+.hero {
+  padding: 8px 0 14px;
+}
+
+.hero h1 {
+  margin: 5px 0 8px;
+  font-size: 23px;
+}
+
+.hero p {
+  line-height: 1.8;
+  color: #666;
+}
+
+.badge {
+  display: inline-block;
+  background: #eef3ff;
+  color: #2455c3;
+  border-radius: 20px;
+  padding: 5px 9px;
+  font-size: 11px;
+}
+
+.message-card {
+  border-radius: 15px;
+  padding: 12px;
+  margin-bottom: 9px;
+  max-width: 88%;
+}
+
+.message-me {
+  margin-right: auto;
+  background: #202124;
+  color: #fff;
+}
+
+.message-other {
+  margin-left: auto;
+  background: #f2f3f5;
+  color: #202124;
+}
+
+.message-author {
+  font-weight: 800;
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+@media(max-width:480px) {
+
+  .content {
+    padding: 10px;
+  }
+
+  .card {
+    border-radius: 15px;
+  }
+
+  .actions button,
+  .actions .btn {
+    padding: 10px 11px;
+  }
+
+}
+
+body.dark {
+  background: #111;
+  color: #eee;
+}
+
+body.dark .app,
+body.dark .header,
+body.dark .bottom-nav,
+body.dark input,
+body.dark textarea {
+  background: #181818;
+  color: #eee;
+}
+
+body.dark .card {
+  background: #1d1d1d;
+  border-color: #333;
+}
+
+body.dark .top-actions a {
+  background: #292929;
+  color: #eee;
+}
+
+body.dark input,
+body.dark textarea {
+  border-color: #444;
+}
+
+body.dark .comment,
+body.dark .job,
+body.dark .message-other {
+  background: #242424;
+  border-color: #3a3a3a;
+  color: #eee;
+}
+
+body.dark .email,
+body.dark .small,
+body.dark .stats {
+  color: #aaa;
+}
+
+</style>
 
 </head>
 
 <body>
 
-  <div class="container">
+<div class="app">
 
-    <div class="top">
+<header class="header">
 
-      <div class="brand">
-        MySocial 🌐
-      </div>
-
-      <div class="brand-small">
-        شبکه اجتماعی ساده و سریع
-      </div>
-
-      ${nav}
-
-    </div>
-
-    ${body}
-
-    <div class="footer">
-      MySocial
-    </div>
-
+  <div class="logo">
+    📱 MySocial
   </div>
 
-</body>
-</html>
-  `;
+  <div class="title">
+    ${escapeHtml(title)}
+  </div>
 
-  res.writeHead(
-    status,
-    {
-      "Content-Type":
-        "text/html; charset=utf-8"
-    }
+</header>
+
+${topMenu}
+
+<main class="content">
+
+${content}
+
+</main>
+
+</div>
+
+${nav}
+
+<script>
+
+function toggleTheme() {
+
+  document.body.classList.toggle("dark");
+
+  localStorage.setItem(
+    "dark",
+    document.body.classList.contains("dark")
   );
 
-  res.end(html);
 }
 
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-
-    let body = "";
-    let size = 0;
-
-    req.on("data", chunk => {
-
-      size += chunk.length;
-
-      if (size > 2 * 1024 * 1024) {
-        reject(
-          new Error("Request body too large")
-        );
-        req.destroy();
-        return;
-      }
-
-      body += chunk.toString();
-    });
-
-    req.on("end", () => {
-
-      try {
-
-        const contentType =
-          req.headers["content-type"] || "";
-
-        if (
-          contentType.includes(
-            "application/x-www-form-urlencoded"
-          )
-        ) {
-
-          resolve(
-            new URLSearchParams(body)
-          );
-
-          return;
-        }
-
-        resolve(
-          new URLSearchParams(body)
-        );
-
-      } catch (e) {
-        reject(e);
-      }
-
-    });
-
-    req.on("error", reject);
-
-  });
+if (
+  localStorage.getItem("dark") === "true"
+) {
+  document.body.classList.add("dark");
 }
 
-function hashPassword(password) {
-  return crypto
-    .createHash("sha256")
-    .update(String(password))
-    .digest("hex");
-}
+</script>
 
-function imageToDataUrl(file) {
+</body>
 
-  if (!file || !file.buffer) {
-    return "";
-  }
-
-  const mime =
-    file.mimeType ||
-    "image/jpeg";
-
-  return `data:${mime};base64,${file.buffer.toString("base64")}`;
-}
-
-async function readMultipart(req) {
-
-  const chunks = [];
-
-  for await (const chunk of req) {
-    chunks.push(chunk);
-  }
-
-  const buffer =
-    Buffer.concat(chunks);
-
-  const contentType =
-    req.headers["content-type"] || "";
-
-  const match =
-    contentType.match(
-      /boundary="?([^";]+)"?/
-    );
-
-  if (!match) {
-    throw new Error("Multipart boundary missing");
-  }
-
-  const boundary =
-    Buffer.from("--" + match[1]);
-
-  const fields = {};
-  const files = {};
-
-  let start = 0;
-
-  while (true) {
-
-    const index =
-      buffer.indexOf(boundary, start);
-
-    if (index === -1) break;
-
-    start =
-      index + boundary.length;
-
-    if (
-      buffer[start] === 45 &&
-      buffer[start + 1] === 45
-    ) {
-      break;
-    }
-
-    if (
-      buffer[start] === 13 &&
-      buffer[start + 1] === 10
-    ) {
-      start += 2;
-    }
-
-    const next =
-      buffer.indexOf(
-        boundary,
-        start
-      );
-
-    if (next === -1) break;
-
-    let part =
-      buffer.slice(
-        start,
-        next
-      );
-
-    if (
-      part[part.length - 2] === 13 &&
-      part[part.length - 1] === 10
-    ) {
-      part =
-        part.slice(
-          0,
-          part.length - 2
-        );
-    }
-
-    const separator =
-      part.indexOf(
-        Buffer.from("\r\n\r\n")
-      );
-
-    if (separator === -1) continue;
-
-    const header =
-      part
-        .slice(0, separator)
-        .toString();
-
-    const data =
-      part.slice(separator + 4);
-
-    const nameMatch =
-      header.match(
-        /name="([^"]+)"/i
-      );
-
-    if (!nameMatch) continue;
-
-    const fieldName =
-      nameMatch[1];
-
-    const fileMatch =
-      header.match(
-        /filename="([^"]*)"/i
-      );
-
-    if (fileMatch) {
-
-      const filename =
-        fileMatch[1];
-
-      const mimeMatch =
-        header.match(
-          /Content-Type:\s*([^\r\n]+)/i
-        );
-
-      files[fieldName] = {
-        filename,
-        mimeType:
-          mimeMatch
-            ? mimeMatch[1].trim()
-            : "application/octet-stream",
-        buffer: data
-      };
-
-    } else {
-
-      fields[fieldName] =
-        data.toString("utf8");
-
-    }
-
-    start = next;
-  }
-
-  return {
-    fields,
-    files
-  };
+</html>`;
 }
 
 /* =========================================================
@@ -725,13 +733,11 @@ async function ensureColumn(
   column,
   definition
 ) {
-
-  await pool.query(`
-    ALTER TABLE ${table}
-    ADD COLUMN IF NOT EXISTS
-    ${column} ${definition}
-  `);
-
+  await pool.query(
+    `ALTER TABLE ${table}
+     ADD COLUMN IF NOT EXISTS ${column}
+     ${definition}`
+  );
 }
 
 async function createTables() {
@@ -739,8 +745,8 @@ async function createTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
-      name VARCHAR(100) NOT NULL,
-      email VARCHAR(200) NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
       bio TEXT DEFAULT '',
       avatar_url TEXT DEFAULT '',
@@ -762,7 +768,7 @@ async function createTables() {
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions (
-      session_id VARCHAR(128) PRIMARY KEY,
+      session_id TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
@@ -776,17 +782,58 @@ async function createTables() {
       user_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-      content TEXT NOT NULL,
-      image_url TEXT,
+      content TEXT,
+      image_url TEXT DEFAULT '',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
   await ensureColumn(
     "posts",
-    "image_url",
+    "content",
     "TEXT"
   );
+
+  await ensureColumn(
+    "posts",
+    "image_url",
+    "TEXT DEFAULT ''"
+  );
+
+  try {
+
+    await pool.query(`
+      UPDATE posts
+      SET content = text
+      WHERE
+        (content IS NULL OR content = '')
+        AND EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_name='posts'
+          AND column_name='text'
+        )
+    `);
+
+  } catch (error) {
+
+    console.log(
+      "Old posts.text migration skipped."
+    );
+
+  }
+
+  await pool.query(`
+    UPDATE posts
+    SET content=''
+    WHERE content IS NULL
+  `);
+
+  await pool.query(`
+    ALTER TABLE posts
+    ALTER COLUMN content
+    SET NOT NULL
+  `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS likes (
@@ -797,8 +844,7 @@ async function createTables() {
       user_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(post_id, user_id)
+      UNIQUE(post_id,user_id)
     )
   `);
 
@@ -825,8 +871,7 @@ async function createTables() {
       following_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(follower_id, following_id)
+      UNIQUE(follower_id,following_id)
     )
   `);
 
@@ -840,21 +885,7 @@ async function createTables() {
         REFERENCES users(id)
         ON DELETE CASCADE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(post_id, user_id)
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS saved_posts (
-      id SERIAL PRIMARY KEY,
-      post_id INTEGER NOT NULL
-        REFERENCES posts(id)
-        ON DELETE CASCADE,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id)
-        ON DELETE CASCADE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(post_id, user_id)
+      UNIQUE(post_id,user_id)
     )
   `);
 
@@ -867,35 +898,23 @@ async function createTables() {
       blocked_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(blocker_id, blocked_id)
+      UNIQUE(blocker_id,blocked_id)
     )
   `);
 
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS blocks (
+    CREATE TABLE IF NOT EXISTS reports (
       id SERIAL PRIMARY KEY,
-      blocker_id INTEGER NOT NULL
+      reporter_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-      blocked_id INTEGER NOT NULL
+      reported_user_id INTEGER
         REFERENCES users(id)
         ON DELETE CASCADE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(blocker_id, blocked_id)
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS messages (
-      id SERIAL PRIMARY KEY,
-      sender_id INTEGER NOT NULL
-        REFERENCES users(id)
+      post_id INTEGER
+        REFERENCES posts(id)
         ON DELETE CASCADE,
-      receiver_id INTEGER NOT NULL
-        REFERENCES users(id)
-        ON DELETE CASCADE,
-      message TEXT NOT NULL,
+      reason TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -913,7 +932,7 @@ async function createTables() {
       post_id INTEGER
         REFERENCES posts(id)
         ON DELETE CASCADE,
-      message TEXT NOT NULL DEFAULT '',
+      message TEXT NOT NULL,
       is_read BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -922,7 +941,7 @@ async function createTables() {
   await ensureColumn(
     "notifications",
     "message",
-    "TEXT DEFAULT ''"
+    "TEXT"
   );
 
   await ensureColumn(
@@ -946,28 +965,19 @@ async function createTables() {
   await pool.query(`
     ALTER TABLE notifications
     ALTER COLUMN message
-    SET DEFAULT ''
-  `);
-
-  await pool.query(`
-    ALTER TABLE notifications
-    ALTER COLUMN message
     SET NOT NULL
   `);
 
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS reports (
+    CREATE TABLE IF NOT EXISTS messages (
       id SERIAL PRIMARY KEY,
-      reporter_id INTEGER NOT NULL
+      sender_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-      reported_user_id INTEGER
+      receiver_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-      post_id INTEGER
-        REFERENCES posts(id)
-        ON DELETE CASCADE,
-      reason TEXT NOT NULL,
+      message TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -978,57 +988,13 @@ async function createTables() {
       user_id INTEGER NOT NULL
         REFERENCES users(id)
         ON DELETE CASCADE,
-      title VARCHAR(200) NOT NULL,
-      city VARCHAR(100) NOT NULL,
-      salary VARCHAR(100) NOT NULL,
+      title TEXT NOT NULL,
+      city TEXT NOT NULL,
+      salary TEXT NOT NULL,
       description TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
-
-  try {
-
-    await pool.query(`
-      INSERT INTO bookmarks(
-        user_id,
-        post_id
-      )
-      SELECT
-        user_id,
-        post_id
-      FROM saved_posts
-      ON CONFLICT DO NOTHING
-    `);
-
-  } catch (e) {
-
-    console.log(
-      "Legacy saved_posts migration skipped."
-    );
-
-  }
-
-  try {
-
-    await pool.query(`
-      INSERT INTO blocked_users(
-        blocker_id,
-        blocked_id
-      )
-      SELECT
-        blocker_id,
-        blocked_id
-      FROM blocks
-      ON CONFLICT DO NOTHING
-    `);
-
-  } catch (e) {
-
-    console.log(
-      "Legacy blocks migration skipped."
-    );
-
-  }
 
   console.log(
     "Database tables checked successfully."
@@ -1041,8 +1007,10 @@ async function createTables() {
 
 async function createSession(userId) {
 
-  const id =
-    crypto.randomBytes(32).toString("hex");
+  const sessionId =
+    crypto
+      .randomBytes(32)
+      .toString("hex");
 
   await pool.query(
     `
@@ -1053,20 +1021,23 @@ async function createSession(userId) {
       VALUES($1,$2)
     `,
     [
-      id,
+      sessionId,
       userId
     ]
   );
 
-  return id;
+  return sessionId;
 }
 
 async function getSession(req) {
 
-  const sid =
-    parseCookies(req).sessionId;
+  const cookies =
+    parseCookies(req);
 
-  if (!sid) {
+  const sessionId =
+    cookies.sessionId;
+
+  if (!sessionId) {
     return null;
   }
 
@@ -1084,14 +1055,64 @@ async function getSession(req) {
           ON u.id=s.user_id
         WHERE s.session_id=$1
       `,
-      [sid]
+      [
+        sessionId
+      ]
     );
 
   return result.rows[0] || null;
 }
 
 /* =========================================================
-   NOTIFICATIONS
+   BLOCK CHECK
+========================================================= */
+
+async function areBlocked(
+  userA,
+  userB
+) {
+
+  if (
+    !Number.isInteger(Number(userA)) ||
+    !Number.isInteger(Number(userB))
+  ) {
+    return false;
+  }
+
+  if (
+    Number(userA) === Number(userB)
+  ) {
+    return false;
+  }
+
+  const result =
+    await pool.query(
+      `
+        SELECT id
+        FROM blocked_users
+        WHERE
+          (
+            blocker_id=$1
+            AND blocked_id=$2
+          )
+          OR
+          (
+            blocker_id=$2
+            AND blocked_id=$1
+          )
+        LIMIT 1
+      `,
+      [
+        userA,
+        userB
+      ]
+    );
+
+  return result.rows.length > 0;
+}
+
+/* =========================================================
+   NOTIFICATION
 ========================================================= */
 
 async function notify(
@@ -1122,43 +1143,12 @@ async function notify(
     `,
     [
       userId,
-      actorId || null,
+      actorId,
       type,
       postId || null,
       message
     ]
   );
-}
-
-async function areBlocked(
-  userA,
-  userB
-) {
-
-  const result =
-    await pool.query(
-      `
-        SELECT id
-        FROM blocked_users
-        WHERE
-          (
-            blocker_id=$1
-            AND blocked_id=$2
-          )
-          OR
-          (
-            blocker_id=$2
-            AND blocked_id=$1
-          )
-        LIMIT 1
-      `,
-      [
-        userA,
-        userB
-      ]
-    );
-
-  return result.rows.length > 0;
 }
 
 /* =========================================================
@@ -1167,7 +1157,7 @@ async function areBlocked(
 
 const server =
   http.createServer(
-    async (req, res) => {
+    async (req,res) => {
 
       try {
 
@@ -1183,9 +1173,9 @@ const server =
         const user =
           await getSession(req);
 
-        /* ===================================================
+        /* =================================================
            HOME
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -1206,13 +1196,14 @@ const server =
                   </h1>
 
                   <p>
-                    پست منتشر کن، کاربران را پیدا کن،
-                    پیام بده، دنبال کن و آگهی کاری ببین.
+                    یک شبکه اجتماعی ساده برای
+                    انتشار پست، دنبال کردن کاربران،
+                    پیام‌رسانی و کاریابی.
                   </p>
 
                 </div>
 
-                <div class="card">
+                <div class="card menu">
 
                   <a href="/signup">
                     <button class="full">
@@ -1237,11 +1228,13 @@ const server =
             await pool.query(
               `
                 SELECT
+
                   p.id,
+                  p.user_id,
                   p.content,
                   p.image_url,
                   p.created_at,
-                  u.id AS user_id,
+
                   u.name,
                   u.email,
                   u.avatar_url,
@@ -1281,16 +1274,16 @@ const server =
 
                 WHERE NOT EXISTS(
                   SELECT 1
-                  FROM blocked_users bu
+                  FROM blocked_users b
                   WHERE
                     (
-                      bu.blocker_id=$1
-                      AND bu.blocked_id=u.id
+                      b.blocker_id=$1
+                      AND b.blocked_id=p.user_id
                     )
                     OR
                     (
-                      bu.blocker_id=u.id
-                      AND bu.blocked_id=$1
+                      b.blocker_id=p.user_id
+                      AND b.blocked_id=$1
                     )
                 )
 
@@ -1298,7 +1291,9 @@ const server =
 
                 LIMIT 100
               `,
-              [user.id]
+              [
+                user.id
+              ]
             );
 
           let html = `
@@ -1312,9 +1307,7 @@ const server =
                     user.avatar_url
                       ? `
                         <img
-                          src="${escapeAttr(
-                            user.avatar_url
-                          )}"
+                          src="${escapeAttr(user.avatar_url)}"
                           alt="پروفایل"
                         >
                       `
@@ -1344,47 +1337,59 @@ const server =
             </div>
 
             <a href="/new-post">
+
               <button class="full">
                 ➕ انتشار پست جدید
               </button>
+
             </a>
+
+            <div class="divider"></div>
           `;
 
           if (!posts.rows.length) {
 
             html += `
               <div class="card empty">
+
                 هنوز پستی منتشر نشده است.
+
                 <br>
+
                 اولین پست را منتشر کن! 📸
+
               </div>
             `;
 
           } else {
 
-            for (const p of posts.rows) {
+            for (
+              const post of posts.rows
+            ) {
 
               html += `
                 <article class="card">
 
                   <div class="profile-head">
 
-                    <a href="/profile?id=${p.user_id}">
+                    <a
+                      href="/profile?id=${post.user_id}"
+                    >
 
                       <div class="avatar">
 
                         ${
-                          p.avatar_url
+                          post.avatar_url
                             ? `
                               <img
                                 src="${escapeAttr(
-                                  p.avatar_url
+                                  post.avatar_url
                                 )}"
                                 alt="پروفایل"
                               >
                             `
                             : escapeHtml(
-                                p.name.charAt(0)
+                                post.name.charAt(0)
                               )
                         }
 
@@ -1394,21 +1399,23 @@ const server =
 
                     <div>
 
-                      <a href="/profile?id=${p.user_id}">
+                      <a
+                        href="/profile?id=${post.user_id}"
+                      >
 
                         <div class="username">
-                          ${escapeHtml(p.name)}
+                          ${escapeHtml(post.name)}
                         </div>
 
                       </a>
 
                       <div class="email">
-                        ${escapeHtml(p.email)}
+                        ${escapeHtml(post.email)}
                       </div>
 
                       <div class="small">
                         ${new Date(
-                          p.created_at
+                          post.created_at
                         ).toLocaleString("fa-IR")}
                       </div>
 
@@ -1417,16 +1424,16 @@ const server =
                   </div>
 
                   <div class="post-text">
-                    ${escapeHtml(p.content)}
+                    ${escapeHtml(post.content)}
                   </div>
 
                   ${
-                    p.image_url
+                    post.image_url
                       ? `
                         <img
                           class="post-image"
                           src="${escapeAttr(
-                            p.image_url
+                            post.image_url
                           )}"
                           alt="تصویر پست"
                         >
@@ -1437,66 +1444,71 @@ const server =
                   <div class="stats">
 
                     <span>
-                      ❤️ ${p.like_count}
+                      ❤️ ${post.like_count}
                     </span>
 
                     <span>
-                      💬 ${p.comment_count}
+                      💬 ${post.comment_count}
                     </span>
 
                   </div>
 
                   <div class="actions">
 
-                    <a href="/like?post=${p.id}">
+                    <a
+                      href="/like?post=${post.id}"
+                    >
+
                       <button class="like">
                         ${
-                          p.liked
+                          post.liked
                             ? "💔 برداشتن لایک"
                             : "❤️ لایک"
                         }
                       </button>
+
                     </a>
 
-                    <a href="/post?id=${p.id}">
+                    <a
+                      href="/post?id=${post.id}"
+                    >
+
                       <button>
-                        💬 نظرها
+                        💬 نظرات
                       </button>
+
                     </a>
 
-                    <a href="/bookmark?post=${p.id}">
+                    <a
+                      href="/bookmark?post=${post.id}"
+                    >
+
                       <button>
                         ${
-                          p.bookmarked
-                            ? "🔖 ذخیره‌شده"
+                          post.bookmarked
+                            ? "🔖 حذف ذخیره"
                             : "🔖 ذخیره"
                         }
                       </button>
+
                     </a>
 
-                    <a href="/report?post=${p.id}&user=${p.user_id}">
+                    <a
+                      href="/report?post=${post.id}&user=${post.user_id}"
+                    >
+
                       <button class="danger">
                         🚩 گزارش
                       </button>
-                    </a>
 
-                    ${
-                      Number(p.user_id) === Number(user.id)
-                        ? `
-                          <a href="/delete-post?id=${p.id}">
-                            <button class="danger">
-                              🗑️ حذف
-                            </button>
-                          </a>
-                        `
-                        : ""
-                    }
+                    </a>
 
                   </div>
 
                 </article>
               `;
             }
+
           }
 
           sendHtml(
@@ -1510,9 +1522,9 @@ const server =
           return;
         }
 
-        /* ===================================================
-           SIGNUP
-        =================================================== */
+        /* =================================================
+           SIGNUP GET
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -1567,13 +1579,17 @@ const server =
               </div>
 
               <a href="/">
-                بازگشت
+                🏠 بازگشت
               </a>
             `
           );
 
           return;
         }
+
+        /* =================================================
+           SIGNUP POST
+        ================================================= */
 
         if (
           req.method === "POST" &&
@@ -1591,8 +1607,9 @@ const server =
           const email =
             String(
               data.get("email") || ""
-            ).trim()
-            .toLowerCase();
+            )
+              .trim()
+              .toLowerCase();
 
           const password =
             String(
@@ -1613,9 +1630,12 @@ const server =
                 <div class="card">
 
                   <p class="error">
-                    نام، ایمیل و رمز حداقل
-                    ۶ کاراکتری لازم است.
+                    نام، ایمیل و رمز حداقل ۶ کاراکتری لازم است.
                   </p>
+
+                  <a href="/signup">
+                    بازگشت
+                  </a>
 
                 </div>
               `
@@ -1650,13 +1670,15 @@ const server =
                 <div class="card">
 
                   <h2 class="success">
-                    ثبت‌نام موفق شد ✅
+                    ثبت‌نام با موفقیت انجام شد ✅
                   </h2>
 
                   <a href="/login">
+
                     <button class="full">
-                      ورود
+                      🔐 ورود
                     </button>
+
                   </a>
 
                 </div>
@@ -1664,11 +1686,6 @@ const server =
             );
 
           } catch (error) {
-
-            console.error(
-              "SIGNUP ERROR:",
-              error
-            );
 
             sendHtml(
               res,
@@ -1678,8 +1695,7 @@ const server =
                 <div class="card">
 
                   <p class="error">
-                    این ایمیل قبلاً ثبت شده است
-                    یا اطلاعات واردشده معتبر نیست.
+                    این ایمیل قبلاً ثبت شده است.
                   </p>
 
                   <a href="/signup">
@@ -1695,9 +1711,9 @@ const server =
           return;
         }
 
-        /* ===================================================
-           LOGIN
-        =================================================== */
+        /* =================================================
+           LOGIN GET
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -1741,11 +1757,19 @@ const server =
                 </form>
 
               </div>
+
+              <a href="/signup">
+                📝 ساخت حساب جدید
+              </a>
             `
           );
 
           return;
         }
+
+        /* =================================================
+           LOGIN POST
+        ================================================= */
 
         if (
           req.method === "POST" &&
@@ -1758,8 +1782,9 @@ const server =
           const email =
             String(
               data.get("email") || ""
-            ).trim()
-            .toLowerCase();
+            )
+              .trim()
+              .toLowerCase();
 
           const password =
             String(
@@ -1772,9 +1797,7 @@ const server =
                 SELECT
                   id,
                   name,
-                  email,
-                  bio,
-                  avatar_url
+                  email
                 FROM users
                 WHERE
                   email=$1
@@ -1810,7 +1833,7 @@ const server =
             return;
           }
 
-          const sid =
+          const sessionId =
             await createSession(
               result.rows[0].id
             );
@@ -1819,38 +1842,30 @@ const server =
             res,
             "/",
             `sessionId=${encodeURIComponent(
-              sid
+              sessionId
             )}; HttpOnly; Path=/; SameSite=Lax`
           );
 
           return;
         }
 
-        /* ===================================================
-           AUTH
-        =================================================== */
+        /* =================================================
+           PROTECTED ROUTES
+        ================================================= */
 
         if (!user) {
 
-          if (
-            req.method === "GET" &&
-            path === "/logout"
-          ) {
-
-            redirect(res, "/");
-
-          } else {
-
-            redirect(res, "/login");
-
-          }
+          redirect(
+            res,
+            "/login"
+          );
 
           return;
         }
 
-        /* ===================================================
-           NEW POST
-        =================================================== */
+        /* =================================================
+           NEW POST GET
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -1865,7 +1880,7 @@ const server =
               <div class="card">
 
                 <h2>
-                  ➕ انتشار پست
+                  ➕ انتشار پست جدید
                 </h2>
 
                 <form
@@ -1882,12 +1897,13 @@ const server =
 
                   <input
                     name="image_url"
+                    type="url"
                     maxlength="2000"
-                    placeholder="لینک تصویر، اختیاری"
+                    placeholder="لینک تصویر (اختیاری)"
                   >
 
                   <button class="full">
-                    📤 انتشار
+                    📢 انتشار
                   </button>
 
                 </form>
@@ -1899,6 +1915,10 @@ const server =
 
           return;
         }
+
+        /* =================================================
+           NEW POST POST
+        ================================================= */
 
         if (
           req.method === "POST" &&
@@ -1928,7 +1948,7 @@ const server =
                 <div class="card">
 
                   <p class="error">
-                    متن پست خالی است.
+                    متن پست نمی‌تواند خالی باشد.
                   </p>
 
                 </div>
@@ -1963,9 +1983,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            LIKE
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -1977,84 +1997,79 @@ const server =
               requestUrl.searchParams.get("post")
             );
 
-          if (Number.isInteger(postId)) {
+          if (
+            Number.isInteger(postId)
+          ) {
 
             const post =
               await pool.query(
                 `
-                  SELECT user_id
-                  FROM posts
-                  WHERE id=$1
-                `,
-                [postId]
-              );
+                  SELECT
+                    user_id,
 
-            if (post.rows.length) {
-
-              const blocked =
-                await areBlocked(
-                  user.id,
-                  post.rows[0].user_id
-                );
-
-              if (!blocked) {
-
-                const existing =
-                  await pool.query(
-                    `
-                      SELECT id
+                    EXISTS(
+                      SELECT 1
                       FROM likes
                       WHERE
                         post_id=$1
                         AND user_id=$2
-                    `,
-                    [
-                      postId,
-                      user.id
-                    ]
-                  );
+                    ) AS liked
 
-                if (existing.rows.length) {
+                  FROM posts
 
-                  await pool.query(
-                    `
-                      DELETE FROM likes
-                      WHERE
-                        post_id=$1
-                        AND user_id=$2
-                    `,
-                    [
-                      postId,
-                      user.id
-                    ]
-                  );
+                  WHERE id=$1
+                `,
+                [
+                  postId,
+                  user.id
+                ]
+              );
 
-                } else {
+            if (post.rows.length) {
 
-                  await pool.query(
-                    `
-                      INSERT INTO likes(
-                        post_id,
-                        user_id
-                      )
-                      VALUES($1,$2)
-                      ON CONFLICT DO NOTHING
-                    `,
-                    [
-                      postId,
-                      user.id
-                    ]
-                  );
+              if (
+                post.rows[0].liked
+              ) {
 
-                  await notify(
-                    post.rows[0].user_id,
-                    user.id,
-                    "like",
+                await pool.query(
+                  `
+                    DELETE FROM likes
+
+                    WHERE
+                      post_id=$1
+                      AND user_id=$2
+                  `,
+                  [
                     postId,
-                    `${user.name} پست شما را پسندید.`
-                  );
+                    user.id
+                  ]
+                );
 
-                }
+              } else {
+
+                await pool.query(
+                  `
+                    INSERT INTO likes(
+                      post_id,
+                      user_id
+                    )
+                    VALUES($1,$2)
+
+                    ON CONFLICT DO NOTHING
+                  `,
+                  [
+                    postId,
+                    user.id
+                  ]
+                );
+
+                await notify(
+                  post.rows[0].user_id,
+                  user.id,
+                  "like",
+                  postId,
+                  `${user.name} پست شما را پسندید.`
+                );
 
               }
 
@@ -2070,9 +2085,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            BOOKMARK
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -2084,7 +2099,9 @@ const server =
               requestUrl.searchParams.get("post")
             );
 
-          if (Number.isInteger(postId)) {
+          if (
+            Number.isInteger(postId)
+          ) {
 
             const post =
               await pool.query(
@@ -2093,7 +2110,9 @@ const server =
                   FROM posts
                   WHERE id=$1
                 `,
-                [postId]
+                [
+                  postId
+                ]
               );
 
             if (post.rows.length) {
@@ -2113,7 +2132,9 @@ const server =
                   ]
                 );
 
-              if (existing.rows.length) {
+              if (
+                existing.rows.length
+              ) {
 
                 await pool.query(
                   `
@@ -2137,6 +2158,7 @@ const server =
                       user_id
                     )
                     VALUES($1,$2)
+
                     ON CONFLICT DO NOTHING
                   `,
                   [
@@ -2161,9 +2183,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            POST DETAIL
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -2175,22 +2197,29 @@ const server =
               requestUrl.searchParams.get("id")
             );
 
-          if (!Number.isInteger(postId)) {
+          if (
+            !Number.isInteger(postId)
+          ) {
 
-            redirect(res, "/");
+            redirect(
+              res,
+              "/"
+            );
+
             return;
-
           }
 
           const result =
             await pool.query(
               `
                 SELECT
+
                   p.id,
                   p.user_id,
                   p.content,
                   p.image_url,
                   p.created_at,
+
                   u.name,
                   u.email,
                   u.avatar_url,
@@ -2224,8 +2253,10 @@ const server =
                   ) AS bookmarked
 
                 FROM posts p
+
                 JOIN users u
                   ON u.id=p.user_id
+
                 WHERE p.id=$2
               `,
               [
@@ -2242,7 +2273,10 @@ const server =
               "پست پیدا نشد",
               `
                 <div class="card empty">
-                  این پست وجود ندارد یا حذف شده است.
+
+                  این پست وجود ندارد
+                  یا حذف شده است.
+
                 </div>
               `,
               user
@@ -2267,7 +2301,9 @@ const server =
               "محدود",
               `
                 <div class="card empty">
+
                   دسترسی به این پست ممکن نیست.
+
                 </div>
               `,
               user
@@ -2280,21 +2316,30 @@ const server =
             await pool.query(
               `
                 SELECT
+
                   c.id,
                   c.comment,
                   c.created_at,
+
                   u.id AS user_id,
                   u.name,
                   u.email,
                   u.avatar_url
+
                 FROM comments c
+
                 JOIN users u
                   ON u.id=c.user_id
+
                 WHERE c.post_id=$1
+
                 ORDER BY c.created_at ASC
+
                 LIMIT 500
               `,
-              [postId]
+              [
+                postId
+              ]
             );
 
           let html = `
@@ -2302,7 +2347,9 @@ const server =
 
               <div class="profile-head">
 
-                <a href="/profile?id=${post.user_id}">
+                <a
+                  href="/profile?id=${post.user_id}"
+                >
 
                   <div class="avatar">
 
@@ -2327,7 +2374,9 @@ const server =
 
                 <div>
 
-                  <a href="/profile?id=${post.user_id}">
+                  <a
+                    href="/profile?id=${post.user_id}"
+                  >
 
                     <div class="username">
                       ${escapeHtml(post.name)}
@@ -2381,17 +2430,24 @@ const server =
 
               <div class="actions">
 
-                <a href="/like?post=${post.id}">
-                  <button>
+                <a
+                  href="/like?post=${post.id}"
+                >
+
+                  <button class="like">
                     ${
                       post.liked
                         ? "💔 برداشتن لایک"
                         : "❤️ لایک"
                     }
                   </button>
+
                 </a>
 
-                <a href="/bookmark?post=${post.id}">
+                <a
+                  href="/bookmark?post=${post.id}"
+                >
+
                   <button>
                     ${
                       post.bookmarked
@@ -2399,27 +2455,39 @@ const server =
                         : "🔖 ذخیره"
                     }
                   </button>
+
                 </a>
 
-                <a href="/report?post=${post.id}&user=${post.user_id}">
+                <a
+                  href="/report?post=${post.id}&user=${post.user_id}"
+                >
+
                   <button class="danger">
                     🚩 گزارش
                   </button>
+
                 </a>
 
                 <a href="/">
+
                   <button>
                     🏠 خانه
                   </button>
+
                 </a>
 
                 ${
-                  Number(post.user_id) === Number(user.id)
+                  Number(post.user_id) ===
+                  Number(user.id)
                     ? `
-                      <a href="/delete-post?id=${post.id}">
+                      <a
+                        href="/delete-post?id=${post.id}"
+                      >
+
                         <button class="danger">
                           🗑️ حذف پست
                         </button>
+
                       </a>
                     `
                     : ""
@@ -2462,7 +2530,9 @@ const server =
             </div>
           `;
 
-          if (!comments.rows.length) {
+          if (
+            !comments.rows.length
+          ) {
 
             html += `
               <div class="card empty">
@@ -2472,29 +2542,33 @@ const server =
 
           } else {
 
-            for (const c of comments.rows) {
+            for (
+              const comment of comments.rows
+            ) {
 
               html += `
                 <div class="card">
 
                   <div class="profile-head">
 
-                    <a href="/profile?id=${c.user_id}">
+                    <a
+                      href="/profile?id=${comment.user_id}"
+                    >
 
                       <div class="avatar">
 
                         ${
-                          c.avatar_url
+                          comment.avatar_url
                             ? `
                               <img
                                 src="${escapeAttr(
-                                  c.avatar_url
+                                  comment.avatar_url
                                 )}"
                                 alt="پروفایل"
                               >
                             `
                             : escapeHtml(
-                                c.name.charAt(0)
+                                comment.name.charAt(0)
                               )
                         }
 
@@ -2504,17 +2578,21 @@ const server =
 
                     <div>
 
-                      <a href="/profile?id=${c.user_id}">
+                      <a
+                        href="/profile?id=${comment.user_id}"
+                      >
 
                         <div class="username">
-                          ${escapeHtml(c.name)}
+                          ${escapeHtml(
+                            comment.name
+                          )}
                         </div>
 
                       </a>
 
                       <div class="small">
                         ${new Date(
-                          c.created_at
+                          comment.created_at
                         ).toLocaleString("fa-IR")}
                       </div>
 
@@ -2522,13 +2600,16 @@ const server =
 
                   </div>
 
-                  <div class="comment-text post-text">
-                    ${escapeHtml(c.comment)}
+                  <div class="comment-text">
+                    ${escapeHtml(
+                      comment.comment
+                    )}
                   </div>
 
                 </div>
               `;
             }
+
           }
 
           sendHtml(
@@ -2542,9 +2623,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            COMMENT
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "POST" &&
@@ -2575,9 +2656,11 @@ const server =
               "خطا",
               `
                 <div class="card">
+
                   <p class="error">
                     اطلاعات نظر معتبر نیست.
                   </p>
+
                 </div>
               `,
               user
@@ -2593,7 +2676,9 @@ const server =
                 FROM posts
                 WHERE id=$1
               `,
-              [postId]
+              [
+                postId
+              ]
             );
 
           if (!post.rows.length) {
@@ -2604,9 +2689,11 @@ const server =
               "خطا",
               `
                 <div class="card">
+
                   <p class="error">
                     پست پیدا نشد.
                   </p>
+
                 </div>
               `,
               user
@@ -2628,9 +2715,11 @@ const server =
               "محدود",
               `
                 <div class="card">
+
                   <p class="error">
                     امکان ارسال نظر وجود ندارد.
                   </p>
+
                 </div>
               `,
               user
@@ -2671,9 +2760,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            PROFILE
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -2689,16 +2778,21 @@ const server =
             await pool.query(
               `
                 SELECT
+
                   id,
                   name,
                   email,
                   bio,
                   avatar_url,
                   created_at
+
                 FROM users
+
                 WHERE id=$1
               `,
-              [profileId]
+              [
+                profileId
+              ]
             );
 
           if (!result.rows.length) {
@@ -2709,9 +2803,11 @@ const server =
               "کاربر پیدا نشد",
               `
                 <div class="card">
+
                   <p class="error">
                     کاربر پیدا نشد.
                   </p>
+
                 </div>
               `,
               user
@@ -2730,7 +2826,9 @@ const server =
                 FROM follows
                 WHERE following_id=$1
               `,
-              [profileId]
+              [
+                profileId
+              ]
             );
 
           const followingCount =
@@ -2740,7 +2838,9 @@ const server =
                 FROM follows
                 WHERE follower_id=$1
               `,
-              [profileId]
+              [
+                profileId
+              ]
             );
 
           const isFollowing =
@@ -2777,16 +2877,23 @@ const server =
             await pool.query(
               `
                 SELECT
+
                   id,
                   content,
                   image_url,
                   created_at
+
                 FROM posts
+
                 WHERE user_id=$1
+
                 ORDER BY created_at DESC
+
                 LIMIT 100
               `,
-              [profileId]
+              [
+                profileId
+              ]
             );
 
           let html = `
@@ -2817,7 +2924,12 @@ const server =
 
               </div>
 
-              <div style="text-align:center;margin-top:10px">
+              <div
+                style="
+                  text-align:center;
+                  margin-top:10px;
+                "
+              >
 
                 <div class="username">
                   ${escapeHtml(profile.name)}
@@ -2854,45 +2966,66 @@ const server =
               </div>
 
               ${
-                Number(profileId) === Number(user.id)
+                Number(profileId) ===
+                Number(user.id)
+
                   ? `
                     <div class="actions">
 
                       <a href="/settings">
+
                         <button>
                           ⚙️ ویرایش پروفایل
                         </button>
+
                       </a>
 
                     </div>
                   `
+
                   : `
                     <div class="actions">
 
-                      <a href="/follow?user=${profileId}">
+                      <a
+                        href="/follow?user=${profileId}"
+                      >
+
                         <button class="follow">
+
                           ${
                             isFollowing.rows.length
                               ? "❌ لغو دنبال کردن"
                               : "➕ دنبال کردن"
                           }
+
                         </button>
+
                       </a>
 
-                      <a href="/messages?user=${profileId}">
+                      <a
+                        href="/messages?user=${profileId}"
+                      >
+
                         <button>
                           💬 پیام
                         </button>
+
                       </a>
 
-                      <a href="/block?user=${profileId}">
+                      <a
+                        href="/block?user=${profileId}"
+                      >
+
                         <button class="danger">
+
                           ${
                             isBlocked.rows.length
                               ? "🔓 رفع مسدودی"
                               : "🚫 مسدود کردن"
                           }
+
                         </button>
+
                       </a>
 
                     </div>
@@ -2902,7 +3035,9 @@ const server =
             </div>
           `;
 
-          if (!posts.rows.length) {
+          if (
+            !posts.rows.length
+          ) {
 
             html += `
               <div class="card empty">
@@ -2912,28 +3047,32 @@ const server =
 
           } else {
 
-            for (const p of posts.rows) {
+            for (
+              const post of posts.rows
+            ) {
 
               html += `
                 <article class="card">
 
                   <div class="small">
                     ${new Date(
-                      p.created_at
+                      post.created_at
                     ).toLocaleString("fa-IR")}
                   </div>
 
                   <div class="post-text">
-                    ${escapeHtml(p.content)}
+                    ${escapeHtml(
+                      post.content
+                    )}
                   </div>
 
                   ${
-                    p.image_url
+                    post.image_url
                       ? `
                         <img
                           class="post-image"
                           src="${escapeAttr(
-                            p.image_url
+                            post.image_url
                           )}"
                           alt="تصویر"
                         >
@@ -2943,19 +3082,29 @@ const server =
 
                   <div class="actions">
 
-                    <a href="/post?id=${p.id}">
+                    <a
+                      href="/post?id=${post.id}"
+                    >
+
                       <button>
                         💬 مشاهده پست
                       </button>
+
                     </a>
 
                     ${
-                      Number(profileId) === Number(user.id)
+                      Number(profileId) ===
+                      Number(user.id)
+
                         ? `
-                          <a href="/delete-post?id=${p.id}">
+                          <a
+                            href="/delete-post?id=${post.id}"
+                          >
+
                             <button class="danger">
                               🗑️ حذف
                             </button>
+
                           </a>
                         `
                         : ""
@@ -2966,6 +3115,7 @@ const server =
                 </article>
               `;
             }
+
           }
 
           sendHtml(
@@ -2979,9 +3129,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            FOLLOW
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -2998,9 +3148,12 @@ const server =
             targetId === user.id
           ) {
 
-            redirect(res, "/");
-            return;
+            redirect(
+              res,
+              "/"
+            );
 
+            return;
           }
 
           const target =
@@ -3010,14 +3163,19 @@ const server =
                 FROM users
                 WHERE id=$1
               `,
-              [targetId]
+              [
+                targetId
+              ]
             );
 
           if (!target.rows.length) {
 
-            redirect(res, "/");
-            return;
+            redirect(
+              res,
+              "/"
+            );
 
+            return;
           }
 
           if (
@@ -3050,11 +3208,14 @@ const server =
               ]
             );
 
-          if (existing.rows.length) {
+          if (
+            existing.rows.length
+          ) {
 
             await pool.query(
               `
                 DELETE FROM follows
+
                 WHERE
                   follower_id=$1
                   AND following_id=$2
@@ -3074,6 +3235,7 @@ const server =
                   following_id
                 )
                 VALUES($1,$2)
+
                 ON CONFLICT DO NOTHING
               `,
               [
@@ -3100,9 +3262,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            SEARCH
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -3118,7 +3280,7 @@ const server =
             <div class="card">
 
               <h2>
-                🔎 جستجوی کاربران
+                🔎 جستجو
               </h2>
 
               <form
@@ -3130,7 +3292,7 @@ const server =
                   name="q"
                   value="${escapeAttr(q)}"
                   maxlength="255"
-                  placeholder="نام یا ایمیل..."
+                  placeholder="نام، ایمیل، شغل..."
                 >
 
                 <button class="full">
@@ -3144,20 +3306,25 @@ const server =
 
           if (q) {
 
-            const results =
+            const users =
               await pool.query(
                 `
                   SELECT
+
                     id,
                     name,
                     email,
                     bio,
                     avatar_url
+
                   FROM users
+
                   WHERE
                     name ILIKE $1
                     OR email ILIKE $1
+
                   ORDER BY name
+
                   LIMIT 50
                 `,
                 [
@@ -3165,39 +3332,49 @@ const server =
                 ]
               );
 
-            if (!results.rows.length) {
+            html += `
+              <h3>
+                👥 کاربران
+              </h3>
+            `;
+
+            if (!users.rows.length) {
 
               html += `
                 <div class="card empty">
-                  نتیجه‌ای پیدا نشد.
+                  کاربری پیدا نشد.
                 </div>
               `;
 
             } else {
 
-              for (const u of results.rows) {
+              for (
+                const found of users.rows
+              ) {
 
                 html += `
                   <div class="card">
 
                     <div class="profile-head">
 
-                      <a href="/profile?id=${u.id}">
+                      <a
+                        href="/profile?id=${found.id}"
+                      >
 
                         <div class="avatar">
 
                           ${
-                            u.avatar_url
+                            found.avatar_url
                               ? `
                                 <img
                                   src="${escapeAttr(
-                                    u.avatar_url
+                                    found.avatar_url
                                   )}"
                                   alt="تصویر"
                                 >
                               `
                               : escapeHtml(
-                                  u.name.charAt(0)
+                                  found.name.charAt(0)
                                 )
                           }
 
@@ -3208,18 +3385,24 @@ const server =
                       <div>
 
                         <div class="username">
-                          ${escapeHtml(u.name)}
+                          ${escapeHtml(
+                            found.name
+                          )}
                         </div>
 
                         <div class="email">
-                          ${escapeHtml(u.email)}
+                          ${escapeHtml(
+                            found.email
+                          )}
                         </div>
 
                         ${
-                          u.bio
+                          found.bio
                             ? `
                               <div class="small">
-                                ${escapeHtml(u.bio)}
+                                ${escapeHtml(
+                                  found.bio
+                                )}
                               </div>
                             `
                             : ""
@@ -3231,19 +3414,29 @@ const server =
 
                     <div class="actions">
 
-                      <a href="/profile?id=${u.id}">
+                      <a
+                        href="/profile?id=${found.id}"
+                      >
+
                         <button>
                           👤 پروفایل
                         </button>
+
                       </a>
 
                       ${
-                        Number(u.id) !== Number(user.id)
+                        Number(found.id) !==
+                        Number(user.id)
+
                           ? `
-                            <a href="/messages?user=${u.id}">
+                            <a
+                              href="/messages?user=${found.id}"
+                            >
+
                               <button>
                                 💬 پیام
                               </button>
+
                             </a>
                           `
                           : ""
@@ -3270,9 +3463,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            MESSAGES
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -3293,14 +3486,19 @@ const server =
               await pool.query(
                 `
                   SELECT
+
                     id,
                     name,
                     email,
                     avatar_url
+
                   FROM users
+
                   WHERE id=$1
                 `,
-                [otherId]
+                [
+                  otherId
+                ]
               );
 
             if (!other.rows.length) {
@@ -3326,9 +3524,11 @@ const server =
                 "مسدود",
                 `
                   <div class="card">
+
                     <p class="error">
                       امکان ارسال پیام به این کاربر وجود ندارد.
                     </p>
+
                   </div>
                 `,
                 user
@@ -3341,27 +3541,37 @@ const server =
               await pool.query(
                 `
                   SELECT
+
                     m.id,
                     m.sender_id,
                     m.receiver_id,
                     m.message,
                     m.created_at,
+
                     u.name,
                     u.avatar_url
+
                   FROM messages m
+
                   JOIN users u
                     ON u.id=m.sender_id
+
                   WHERE
+
                     (
                       m.sender_id=$1
                       AND m.receiver_id=$2
                     )
+
                     OR
+
                     (
                       m.sender_id=$2
                       AND m.receiver_id=$1
                     )
+
                   ORDER BY m.created_at ASC
+
                   LIMIT 300
                 `,
                 [
@@ -3397,10 +3607,13 @@ const server =
                   <div>
 
                     <h2 style="margin:0">
+
                       💬 گفتگو با
+
                       ${escapeHtml(
                         other.rows[0].name
                       )}
+
                     </h2>
 
                     <div class="small">
@@ -3416,7 +3629,9 @@ const server =
               </div>
             `;
 
-            if (!messages.rows.length) {
+            if (
+              !messages.rows.length
+            ) {
 
               html += `
                 <div class="card empty">
@@ -3426,35 +3641,41 @@ const server =
 
             } else {
 
-              for (const m of messages.rows) {
+              for (
+                const message of messages.rows
+              ) {
 
                 const mine =
-                  Number(m.sender_id) ===
+                  Number(message.sender_id) ===
                   Number(user.id);
 
                 html += `
-                  <div class="
-                    message-card
-                    ${
-                      mine
-                        ? "message-me"
-                        : "message-other"
-                    }
-                  ">
+                  <div
+                    class="
+                      message-card
+                      ${
+                        mine
+                          ? "message-me"
+                          : "message-other"
+                      }
+                    "
+                  >
 
                     <div class="message-author">
-                      ${escapeHtml(m.name)}
+                      ${escapeHtml(
+                        message.name
+                      )}
                     </div>
 
                     <div class="post-text">
                       ${escapeHtml(
-                        m.message
+                        message.message
                       )}
                     </div>
 
                     <div class="small">
                       ${new Date(
-                        m.created_at
+                        message.created_at
                       ).toLocaleString("fa-IR")}
                     </div>
 
@@ -3509,12 +3730,16 @@ const server =
             await pool.query(
               `
                 SELECT DISTINCT
+
                   u.id,
                   u.name,
                   u.email,
                   u.avatar_url
+
                 FROM users u
+
                 WHERE u.id IN(
+
                   SELECT receiver_id
                   FROM messages
                   WHERE sender_id=$1
@@ -3524,10 +3749,14 @@ const server =
                   SELECT sender_id
                   FROM messages
                   WHERE receiver_id=$1
+
                 )
+
                 ORDER BY u.name
               `,
-              [user.id]
+              [
+                user.id
+              ]
             );
 
           let html = `
@@ -3542,15 +3771,19 @@ const server =
               </p>
 
               <a href="/search">
+
                 <button>
                   🔎 پیدا کردن کاربر
                 </button>
+
               </a>
 
             </div>
           `;
 
-          if (!contacts.rows.length) {
+          if (
+            !contacts.rows.length
+          ) {
 
             html += `
               <div class="card empty">
@@ -3560,7 +3793,9 @@ const server =
 
           } else {
 
-            for (const c of contacts.rows) {
+            for (
+              const contact of contacts.rows
+            ) {
 
               html += `
                 <div class="card">
@@ -3570,17 +3805,17 @@ const server =
                     <div class="avatar">
 
                       ${
-                        c.avatar_url
+                        contact.avatar_url
                           ? `
                             <img
                               src="${escapeAttr(
-                                c.avatar_url
+                                contact.avatar_url
                               )}"
                               alt="پروفایل"
                             >
                           `
                           : escapeHtml(
-                              c.name.charAt(0)
+                              contact.name.charAt(0)
                             )
                       }
 
@@ -3589,11 +3824,15 @@ const server =
                     <div>
 
                       <div class="username">
-                        ${escapeHtml(c.name)}
+                        ${escapeHtml(
+                          contact.name
+                        )}
                       </div>
 
                       <div class="email">
-                        ${escapeHtml(c.email)}
+                        ${escapeHtml(
+                          contact.email
+                        )}
                       </div>
 
                     </div>
@@ -3602,10 +3841,14 @@ const server =
 
                   <div class="actions">
 
-                    <a href="/messages?user=${c.id}">
+                    <a
+                      href="/messages?user=${contact.id}"
+                    >
+
                       <button>
                         💬 باز کردن گفتگو
                       </button>
+
                     </a>
 
                   </div>
@@ -3627,9 +3870,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            SEND MESSAGE
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "POST" &&
@@ -3670,7 +3913,9 @@ const server =
                 FROM users
                 WHERE id=$1
               `,
-              [receiverId]
+              [
+                receiverId
+              ]
             );
 
           if (!receiver.rows.length) {
@@ -3696,9 +3941,11 @@ const server =
               "مسدود",
               `
                 <div class="card">
+
                   <p class="error">
                     امکان ارسال پیام به این کاربر وجود ندارد.
                   </p>
+
                 </div>
               `,
               user
@@ -3739,9 +3986,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            NOTIFICATIONS
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -3752,30 +3999,43 @@ const server =
             await pool.query(
               `
                 SELECT
+
                   n.id,
                   n.type,
                   n.message,
                   n.is_read,
                   n.created_at,
+
                   u.name AS actor_name,
                   u.avatar_url AS actor_avatar
+
                 FROM notifications n
+
                 LEFT JOIN users u
                   ON u.id=n.actor_id
+
                 WHERE n.user_id=$1
+
                 ORDER BY n.created_at DESC
+
                 LIMIT 100
               `,
-              [user.id]
+              [
+                user.id
+              ]
             );
 
           await pool.query(
             `
               UPDATE notifications
+
               SET is_read=TRUE
+
               WHERE user_id=$1
             `,
-            [user.id]
+            [
+              user.id
+            ]
           );
 
           let html = `
@@ -3788,7 +4048,9 @@ const server =
             </div>
           `;
 
-          if (!notifications.rows.length) {
+          if (
+            !notifications.rows.length
+          ) {
 
             html += `
               <div class="card empty">
@@ -3798,7 +4060,10 @@ const server =
 
           } else {
 
-            for (const n of notifications.rows) {
+            for (
+              const notification
+              of notifications.rows
+            ) {
 
               html += `
                 <div class="card">
@@ -3808,11 +4073,11 @@ const server =
                     <div class="avatar">
 
                       ${
-                        n.actor_avatar
+                        notification.actor_avatar
                           ? `
                             <img
                               src="${escapeAttr(
-                                n.actor_avatar
+                                notification.actor_avatar
                               )}"
                               alt="پروفایل"
                             >
@@ -3825,15 +4090,20 @@ const server =
                     <div>
 
                       <div class="username">
+
                         ${escapeHtml(
-                          n.actor_name || "سیستم"
+                          notification.actor_name ||
+                          "سیستم"
                         )}
+
                       </div>
 
                       <div class="small">
+
                         ${new Date(
-                          n.created_at
+                          notification.created_at
                         ).toLocaleString("fa-IR")}
+
                       </div>
 
                     </div>
@@ -3841,7 +4111,11 @@ const server =
                   </div>
 
                   <div class="post-text">
-                    ${escapeHtml(n.message)}
+
+                    ${escapeHtml(
+                      notification.message
+                    )}
+
                   </div>
 
                 </div>
@@ -3861,9 +4135,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            SAVED
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -3874,24 +4148,34 @@ const server =
             await pool.query(
               `
                 SELECT
+
                   p.id,
                   p.content,
                   p.image_url,
                   p.created_at,
+
                   u.id AS user_id,
                   u.name,
                   u.email,
                   u.avatar_url
+
                 FROM bookmarks b
+
                 JOIN posts p
                   ON p.id=b.post_id
+
                 JOIN users u
                   ON u.id=p.user_id
+
                 WHERE b.user_id=$1
+
                 ORDER BY b.created_at DESC
+
                 LIMIT 100
               `,
-              [user.id]
+              [
+                user.id
+              ]
             );
 
           let html = `
@@ -3904,17 +4188,23 @@ const server =
             </div>
           `;
 
-          if (!saved.rows.length) {
+          if (
+            !saved.rows.length
+          ) {
 
             html += `
               <div class="card empty">
+
                 هنوز پستی ذخیره نکرده‌اید.
+
               </div>
             `;
 
           } else {
 
-            for (const p of saved.rows) {
+            for (
+              const post of saved.rows
+            ) {
 
               html += `
                 <article class="card">
@@ -3924,17 +4214,17 @@ const server =
                     <div class="avatar">
 
                       ${
-                        p.avatar_url
+                        post.avatar_url
                           ? `
                             <img
                               src="${escapeAttr(
-                                p.avatar_url
+                                post.avatar_url
                               )}"
                               alt="پروفایل"
                             >
                           `
                           : escapeHtml(
-                              p.name.charAt(0)
+                              post.name.charAt(0)
                             )
                       }
 
@@ -3943,16 +4233,16 @@ const server =
                     <div>
 
                       <div class="username">
-                        ${escapeHtml(p.name)}
+                        ${escapeHtml(post.name)}
                       </div>
 
                       <div class="email">
-                        ${escapeHtml(p.email)}
+                        ${escapeHtml(post.email)}
                       </div>
 
                       <div class="small">
                         ${new Date(
-                          p.created_at
+                          post.created_at
                         ).toLocaleString("fa-IR")}
                       </div>
 
@@ -3961,16 +4251,16 @@ const server =
                   </div>
 
                   <div class="post-text">
-                    ${escapeHtml(p.content)}
+                    ${escapeHtml(post.content)}
                   </div>
 
                   ${
-                    p.image_url
+                    post.image_url
                       ? `
                         <img
                           class="post-image"
                           src="${escapeAttr(
-                            p.image_url
+                            post.image_url
                           )}"
                           alt="تصویر"
                         >
@@ -3980,16 +4270,24 @@ const server =
 
                   <div class="actions">
 
-                    <a href="/post?id=${p.id}">
+                    <a
+                      href="/post?id=${post.id}"
+                    >
+
                       <button>
                         مشاهده پست
                       </button>
+
                     </a>
 
-                    <a href="/bookmark?post=${p.id}&from=saved">
+                    <a
+                      href="/bookmark?post=${post.id}&from=saved"
+                    >
+
                       <button class="danger">
                         ❌ حذف از ذخیره‌ها
                       </button>
+
                     </a>
 
                   </div>
@@ -4011,9 +4309,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            REPORT GET
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -4073,7 +4371,9 @@ const server =
                     type="hidden"
                     name="reported_user_id"
                     value="${
-                      Number.isInteger(reportedUserId)
+                      Number.isInteger(
+                        reportedUserId
+                      )
                         ? reportedUserId
                         : ""
                     }"
@@ -4100,9 +4400,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            REPORT POST
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "POST" &&
@@ -4131,7 +4431,9 @@ const server =
             !reason ||
             (
               !Number.isInteger(postId) &&
-              !Number.isInteger(reportedUserId)
+              !Number.isInteger(
+                reportedUserId
+              )
             )
           ) {
 
@@ -4155,7 +4457,9 @@ const server =
             `,
             [
               user.id,
-              Number.isInteger(reportedUserId)
+              Number.isInteger(
+                reportedUserId
+              )
                 ? reportedUserId
                 : null,
               Number.isInteger(postId)
@@ -4188,9 +4492,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            BLOCK
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -4222,7 +4526,9 @@ const server =
                 FROM users
                 WHERE id=$1
               `,
-              [targetId]
+              [
+                targetId
+              ]
             );
 
           if (!target.rows.length) {
@@ -4240,6 +4546,7 @@ const server =
               `
                 SELECT id
                 FROM blocked_users
+
                 WHERE
                   blocker_id=$1
                   AND blocked_id=$2
@@ -4250,11 +4557,14 @@ const server =
               ]
             );
 
-          if (existing.rows.length) {
+          if (
+            existing.rows.length
+          ) {
 
             await pool.query(
               `
                 DELETE FROM blocked_users
+
                 WHERE
                   blocker_id=$1
                   AND blocked_id=$2
@@ -4274,6 +4584,7 @@ const server =
                   blocked_id
                 )
                 VALUES($1,$2)
+
                 ON CONFLICT DO NOTHING
               `,
               [
@@ -4285,6 +4596,7 @@ const server =
             await pool.query(
               `
                 DELETE FROM follows
+
                 WHERE
                   (
                     follower_id=$1
@@ -4312,9 +4624,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            JOBS
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -4325,6 +4637,7 @@ const server =
             await pool.query(
               `
                 SELECT
+
                   j.id,
                   j.user_id,
                   j.title,
@@ -4332,29 +4645,43 @@ const server =
                   j.salary,
                   j.description,
                   j.created_at,
+
                   u.name,
                   u.email
+
                 FROM jobs j
+
                 JOIN users u
                   ON u.id=j.user_id
+
                 WHERE NOT EXISTS(
+
                   SELECT 1
+
                   FROM blocked_users b
+
                   WHERE
                     (
                       b.blocker_id=$1
                       AND b.blocked_id=j.user_id
                     )
+
                     OR
+
                     (
                       b.blocker_id=j.user_id
                       AND b.blocked_id=$1
                     )
+
                 )
+
                 ORDER BY j.created_at DESC
+
                 LIMIT 100
               `,
-              [user.id]
+              [
+                user.id
+              ]
             );
 
           let html = `
@@ -4365,15 +4692,19 @@ const server =
               </h2>
 
               <a href="/new-job">
+
                 <button>
                   ➕ ثبت آگهی کار
                 </button>
+
               </a>
 
             </div>
           `;
 
-          if (!jobs.rows.length) {
+          if (
+            !jobs.rows.length
+          ) {
 
             html += `
               <div class="card empty">
@@ -4383,49 +4714,59 @@ const server =
 
           } else {
 
-            for (const j of jobs.rows) {
+            for (
+              const job of jobs.rows
+            ) {
 
               html += `
                 <div class="card">
 
                   <div class="job-title">
-                    ${escapeHtml(j.title)}
+                    ${escapeHtml(job.title)}
                   </div>
 
                   <div class="job-city">
                     📍 شهر:
-                    ${escapeHtml(j.city)}
+                    ${escapeHtml(job.city)}
                   </div>
 
                   <div class="job-salary">
                     💰 حقوق:
-                    ${escapeHtml(j.salary)}
+                    ${escapeHtml(job.salary)}
                   </div>
 
                   <div class="job-description">
-                    ${escapeHtml(j.description)}
+                    ${escapeHtml(
+                      job.description
+                    )}
                   </div>
 
                   <div class="small">
                     منتشرکننده:
-                    ${escapeHtml(j.name)}
+                    ${escapeHtml(job.name)}
                   </div>
 
                   <div class="small">
                     ${new Date(
-                      j.created_at
+                      job.created_at
                     ).toLocaleString("fa-IR")}
                   </div>
 
                   ${
-                    Number(j.user_id) === Number(user.id)
+                    Number(job.user_id) ===
+                    Number(user.id)
+
                       ? `
                         <div class="actions">
 
-                          <a href="/delete-job?id=${j.id}">
+                          <a
+                            href="/delete-job?id=${job.id}"
+                          >
+
                             <button class="danger">
                               🗑️ حذف آگهی
                             </button>
+
                           </a>
 
                         </div>
@@ -4450,9 +4791,9 @@ const server =
           return;
         }
 
-        /* ===================================================
-           NEW JOB
-        =================================================== */
+        /* =================================================
+           NEW JOB GET
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -4503,7 +4844,7 @@ const server =
                     required
                   ></textarea>
 
-                  <button class="full">
+                  <button class="full green">
                     📢 انتشار آگهی
                   </button>
 
@@ -4516,6 +4857,10 @@ const server =
 
           return;
         }
+
+        /* =================================================
+           NEW JOB POST
+        ================================================= */
 
         if (
           req.method === "POST" &&
@@ -4599,9 +4944,9 @@ const server =
           return;
         }
 
-        /* ===================================================
-           SETTINGS GET
-        =================================================== */
+        /* =================================================
+           SETTINGS
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -4612,14 +4957,19 @@ const server =
             await pool.query(
               `
                 SELECT
+
                   name,
                   email,
                   bio,
                   avatar_url
+
                 FROM users
+
                 WHERE id=$1
               `,
-              [user.id]
+              [
+                user.id
+              ]
             );
 
           const profile =
@@ -4636,11 +4986,13 @@ const server =
                   ⚙️ تنظیمات پروفایل
                 </h2>
 
-                <div style="
-                  display:flex;
-                  justify-content:center;
-                  margin-bottom:15px;
-                ">
+                <div
+                  style="
+                    display:flex;
+                    justify-content:center;
+                    margin-bottom:15px;
+                  "
+                >
 
                   <div class="avatar large">
 
@@ -4666,7 +5018,6 @@ const server =
                 <form
                   method="POST"
                   action="/settings"
-                  enctype="multipart/form-data"
                 >
 
                   <input
@@ -4687,25 +5038,48 @@ const server =
                     profile.bio || ""
                   )}</textarea>
 
-                  <label>
-                    📷 انتخاب عکس پروفایل
-                  </label>
-
                   <input
-                    type="file"
-                    name="avatar"
-                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    name="avatar_url"
+                    type="url"
+                    maxlength="2000"
+                    value="${escapeAttr(
+                      profile.avatar_url || ""
+                    )}"
+                    placeholder="لینک عکس پروفایل"
                   >
-
-                  <div class="notice">
-                    حداکثر حجم تصویر: ۲ مگابایت
-                  </div>
 
                   <button class="full">
                     💾 ذخیره تغییرات
                   </button>
 
                 </form>
+
+              </div>
+
+              <div class="card">
+
+                <h3>
+                  🔐 امنیت
+                </h3>
+
+                <a href="/password">
+
+                  <button>
+                    تغییر رمز عبور
+                  </button>
+
+                </a>
+
+              </div>
+
+              <div class="card">
+
+                <button
+                  class="theme-btn full"
+                  onclick="toggleTheme()"
+                >
+                  🌙 تغییر حالت نمایش
+                </button>
 
               </div>
             `,
@@ -4715,121 +5089,32 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            SETTINGS POST
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "POST" &&
           path === "/settings"
         ) {
 
-          const contentType =
-            req.headers["content-type"] || "";
+          const data =
+            await readBody(req);
 
-          let name = "";
-          let bio = "";
-          let avatarUrl =
-            user.avatar_url || "";
+          const name =
+            String(
+              data.get("name") || ""
+            ).trim();
 
-          if (
-            contentType.includes(
-              "multipart/form-data"
-            )
-          ) {
+          const bio =
+            String(
+              data.get("bio") || ""
+            ).trim();
 
-            const form =
-              await readMultipart(req);
-
-            name =
-              String(
-                form.fields.name || ""
-              ).trim();
-
-            bio =
-              String(
-                form.fields.bio || ""
-              ).trim();
-
-            const avatar =
-              form.files.avatar;
-
-            if (
-              avatar &&
-              avatar.buffer &&
-              avatar.buffer.length
-            ) {
-
-              if (
-                avatar.buffer.length >
-                2 * 1024 * 1024
-              ) {
-
-                sendHtml(
-                  res,
-                  400,
-                  "خطا",
-                  `
-                    <div class="card">
-                      <p class="error">
-                        حجم تصویر بیشتر از ۲ مگابایت است.
-                      </p>
-                    </div>
-                  `,
-                  user
-                );
-
-                return;
-              }
-
-              const allowed =
-                [
-                  "image/jpeg",
-                  "image/png",
-                  "image/webp",
-                  "image/gif"
-                ];
-
-              if (
-                allowed.includes(
-                  avatar.mimeType
-                )
-              ) {
-
-                avatarUrl =
-                  imageToDataUrl(
-                    avatar
-                  );
-
-              }
-
-            }
-
-          } else {
-
-            const data =
-              await readBody(req);
-
-            name =
-              String(
-                data.get("name") || ""
-              ).trim();
-
-            bio =
-              String(
-                data.get("bio") || ""
-              ).trim();
-
-            const oldAvatar =
-              String(
-                data.get("avatar_url") || ""
-              ).trim();
-
-            if (oldAvatar) {
-              avatarUrl = oldAvatar;
-            }
-
-          }
+          const avatarUrl =
+            String(
+              data.get("avatar_url") || ""
+            ).trim();
 
           if (!name) {
 
@@ -4855,10 +5140,12 @@ const server =
           await pool.query(
             `
               UPDATE users
+
               SET
                 name=$1,
                 bio=$2,
                 avatar_url=$3
+
               WHERE id=$4
             `,
             [
@@ -4877,9 +5164,186 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
+           PASSWORD GET
+        ================================================= */
+
+        if (
+          req.method === "GET" &&
+          path === "/password"
+        ) {
+
+          sendHtml(
+            res,
+            200,
+            "تغییر رمز عبور",
+            `
+              <div class="card">
+
+                <h2>
+                  🔐 تغییر رمز عبور
+                </h2>
+
+                <form
+                  method="POST"
+                  action="/password"
+                >
+
+                  <input
+                    name="old_password"
+                    type="password"
+                    placeholder="رمز فعلی"
+                    required
+                  >
+
+                  <input
+                    name="new_password"
+                    type="password"
+                    minlength="6"
+                    placeholder="رمز جدید، حداقل ۶ کاراکتر"
+                    required
+                  >
+
+                  <button class="full">
+                    تغییر رمز
+                  </button>
+
+                </form>
+
+              </div>
+            `,
+            user
+          );
+
+          return;
+        }
+
+        /* =================================================
+           PASSWORD POST
+        ================================================= */
+
+        if (
+          req.method === "POST" &&
+          path === "/password"
+        ) {
+
+          const data =
+            await readBody(req);
+
+          const oldPassword =
+            String(
+              data.get("old_password") || ""
+            );
+
+          const newPassword =
+            String(
+              data.get("new_password") || ""
+            );
+
+          if (
+            newPassword.length < 6
+          ) {
+
+            sendHtml(
+              res,
+              400,
+              "خطا",
+              `
+                <div class="card">
+
+                  <p class="error">
+                    رمز جدید باید حداقل ۶ کاراکتر باشد.
+                  </p>
+
+                </div>
+              `,
+              user
+            );
+
+            return;
+          }
+
+          const result =
+            await pool.query(
+              `
+                SELECT password
+                FROM users
+                WHERE id=$1
+              `,
+              [
+                user.id
+              ]
+            );
+
+          if (
+            !result.rows.length ||
+            hashPassword(oldPassword) !==
+            result.rows[0].password
+          ) {
+
+            sendHtml(
+              res,
+              400,
+              "خطا",
+              `
+                <div class="card">
+
+                  <p class="error">
+                    رمز فعلی اشتباه است.
+                  </p>
+
+                </div>
+              `,
+              user
+            );
+
+            return;
+          }
+
+          await pool.query(
+            `
+              UPDATE users
+
+              SET password=$1
+
+              WHERE id=$2
+            `,
+            [
+              hashPassword(newPassword),
+              user.id
+            ]
+          );
+
+          sendHtml(
+            res,
+            200,
+            "موفق",
+            `
+              <div class="card">
+
+                <h2 class="success">
+                  رمز عبور تغییر کرد ✅
+                </h2>
+
+                <a href="/settings">
+
+                  <button class="full">
+                    بازگشت
+                  </button>
+
+                </a>
+
+              </div>
+            `,
+            user
+          );
+
+          return;
+        }
+
+        /* =================================================
            DELETE POST
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -4891,11 +5355,14 @@ const server =
               requestUrl.searchParams.get("id")
             );
 
-          if (Number.isInteger(postId)) {
+          if (
+            Number.isInteger(postId)
+          ) {
 
             await pool.query(
               `
                 DELETE FROM posts
+
                 WHERE
                   id=$1
                   AND user_id=$2
@@ -4916,9 +5383,9 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            DELETE JOB
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
@@ -4930,11 +5397,14 @@ const server =
               requestUrl.searchParams.get("id")
             );
 
-          if (Number.isInteger(jobId)) {
+          if (
+            Number.isInteger(jobId)
+          ) {
 
             await pool.query(
               `
                 DELETE FROM jobs
+
                 WHERE
                   id=$1
                   AND user_id=$2
@@ -4955,47 +5425,45 @@ const server =
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            LOGOUT
-        =================================================== */
+        ================================================= */
 
         if (
           req.method === "GET" &&
           path === "/logout"
         ) {
 
-          const sid =
+          const sessionId =
             parseCookies(req).sessionId;
 
-          if (sid) {
+          if (sessionId) {
 
             await pool.query(
               `
                 DELETE FROM sessions
+
                 WHERE session_id=$1
               `,
-              [sid]
+              [
+                sessionId
+              ]
             );
 
           }
 
-          res.writeHead(
-            302,
-            {
-              "Set-Cookie":
-                "sessionId=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax",
-              Location: "/"
-            }
+          redirect(
+            res,
+            "/",
+            "sessionId=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax"
           );
-
-          res.end();
 
           return;
         }
 
-        /* ===================================================
+        /* =================================================
            404
-        =================================================== */
+        ================================================= */
 
         sendHtml(
           res,
@@ -5013,9 +5481,11 @@ const server =
               </p>
 
               <a href="/">
+
                 <button>
                   🏠 بازگشت به خانه
                 </button>
+
               </a>
 
             </div>
@@ -5030,7 +5500,9 @@ const server =
           error
         );
 
-        if (!res.headersSent) {
+        if (
+          !res.headersSent
+        ) {
 
           sendHtml(
             res,
@@ -5053,7 +5525,7 @@ const server =
 
               </div>
             `,
-            null
+            user
           );
 
         } else {
