@@ -1015,7 +1015,6 @@ async function createTables() {
       UNIQUE(user_id,name)
     )
   `);
-
   await pool.query(`
     CREATE TABLE IF NOT EXISTS collection_items (
       collection_id INTEGER NOT NULL
@@ -1026,23 +1025,26 @@ async function createTables() {
     )
   `);
 
-  await pool.query(     if(
-        req.method==="GET" &&
-        path==="/logout"
-      ) {
+  if(
+    req.method==="GET" &&
+    path==="/logout"
+  ) {
 
-        const sid =
-          parseCookies(req).sessionId;
+    const sid =
+      parseCookies(req).sessionId;
 
-        if(sid) {
-          await pool.query(
-            `
-            DELETE FROM sessions
-            WHERE session_id=$1
-            `,
-            [sid]
-          );
-        }
+    if(sid) {
+      await pool.query(
+        `
+        DELETE FROM sessions
+        WHERE session_id=$1
+        `,
+        [sid]
+      );
+    }
+
+    return redirect(res, "/login");
+                   }
 
         redirect(
           res,
