@@ -1,4 +1,4 @@
-     const http = require("http");
+ const http = require("http");
 const crypto = require("crypto");
 const { Pool } = require("pg");
 
@@ -31,54 +31,35 @@ function escapeHtml(value) {
 function parseCookies(req) {
   const cookies = {};
   const header = req.headers.cookie || "";
-
   header.split(";").forEach(part => {
     const i = part.indexOf("=");
     if (i < 0) return;
-
     const key = part.slice(0, i).trim();
     const value = part.slice(i + 1).trim();
-
-    try {
-      cookies[key] = decodeURIComponent(value);
-    } catch {
-      cookies[key] = value;
-    }
+    try { cookies[key] = decodeURIComponent(value); }
+    catch { cookies[key] = value; }
   });
-
   return cookies;
 }
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let body = "";
-
     req.on("data", chunk => {
       body += chunk;
-
       if (body.length > 1024 * 1024) {
         reject(new Error("Request body too large"));
         req.destroy();
       }
     });
-
-    req.on("end", () => {
-      resolve(new URLSearchParams(body));
-    });
-
+    req.on("end", () => resolve(new URLSearchParams(body)));
     req.on("error", reject);
   });
 }
 
 function redirect(res, location, cookie) {
-  const headers = {
-    Location: location
-  };
-
-  if (cookie) {
-    headers["Set-Cookie"] = cookie;
-  }
-
+  const headers = { Location: location };
+  if (cookie) headers["Set-Cookie"] = cookie;
   res.writeHead(302, headers);
   res.end();
 }
@@ -88,7 +69,6 @@ function sendHtml(res, status, title, content, user = null) {
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-store"
   });
-
   res.end(page(title, content, user));
 }
 
@@ -107,8 +87,7 @@ function page(title, content, user) {
     <div class="top-actions">
       <a href="/notifications">🔔 اعلان‌ها</a>
       <a href="/jobs">💼 کاریابی</a>
-      <a href="/account">📱 امکانات</a>
-      <a href="/settings">⚙️ تنظیمات</a>
+      <a href="/account">📱 امکانات</a><a href="/settings">⚙️ تنظیمات</a>
       <a href="/logout">🚪 خروج</a>
     </div>
   ` : "";
@@ -119,453 +98,71 @@ function page(title, content, user) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHtml(title)}</title>
-
 <style>
-*{
-  box-sizing:border-box
-}
-
-body{
-  margin:0;
-  background:#eef1f5;
-  color:#202124;
-  font-family:Tahoma,Arial,sans-serif
-}
-
-.app{
-  width:100%;
-  max-width:720px;
-  min-height:100vh;
-  margin:auto;
-  background:#fff;
-  padding-bottom:${user ? "90px" : "25px"}
-}
-
-.header{
-  position:sticky;
-  top:0;
-  z-index:30;
-  background:#fff;
-  border-bottom:1px solid #e4e7eb;
-  padding:13px 15px;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px
-}
-
-.logo{
-  font-weight:800;
-  font-size:19px
-}
-
-.title{
-  font-size:17px;
-  font-weight:700
-}
-
-.content{
-  padding:14px
-}
-
-.card{
-  background:#fff;
-  border:1px solid #e1e5ea;
-  border-radius:18px;
-  padding:15px;
-  margin-bottom:14px;
-  box-shadow:0 2px 8px rgba(0,0,0,.04)
-}
-
-.profile-head{
-  display:flex;
-  align-items:center;
-  gap:11px
-}
-
-.avatar{
-  width:52px;
-  height:52px;
-  border-radius:50%;
-  background:#202124;
-  color:#fff;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-size:22px;
-  font-weight:bold;
-  flex:none
-}
-
-.username{
-  font-weight:800;
-  font-size:16px
-}
-
-.email{
-  color:#777;
-  font-size:12px;
-  margin-top:4px;
-  direction:ltr;
-  text-align:right
-}
-
-.post-text{
-  margin:17px 0;
-  line-height:1.9;
-  white-space:pre-wrap;
-  word-break:break-word
-}
-
-.stats{
-  display:flex;
-  gap:14px;
-  color:#666;
-  font-size:13px;
-  flex-wrap:wrap
-}
-
-.actions{
-  display:flex;
-  gap:7px;
-  flex-wrap:wrap;
-  margin-top:12px
-}
-
-button,
-.btn{
-  border:0;
-  border-radius:11px;
-  padding:11px 14px;
-  background:#202124;
-  color:#fff;
-  cursor:pointer;
-  font-size:14px;
-  text-decoration:none;
-  display:inline-block
-}
-
-button:hover,
-.btn:hover{
-  opacity:.9
-}
-
-.full{
-  width:100%;
-  margin-top:8px;
-  text-align:center
-}
-
-.like{
-  background:#e91e63
-}
-
-.follow{
-  background:#1976d2
-}
-
-.danger{
-  background:#b00020
-}
-
-.green{
-  background:#087f23
-}
-
-input,
-textarea,
-select{
-  width:100%;
-  padding:12px;
-  margin:7px 0;
-  border:1px solid #ccd2d9;
-  border-radius:11px;
-  font-size:16px;
-  font-family:Tahoma,Arial,sans-serif;
-  background:#fff
-}
-
-textarea{
-  min-height:120px;
-  resize:vertical
-}
-
-a{
-  text-decoration:none;
-  color:inherit
-}
-
-.top-actions{
-  display:flex;
-  gap:7px;
-  overflow:auto;
-  padding:0 14px 12px
-}
-
-.top-actions a{
-  background:#f4f6f8;
-  border-radius:10px;
-  padding:8px 10px;
-  white-space:nowrap;
-  font-size:12px
-}
-
-.menu{
-  display:grid;
-  gap:9px
-}
-
-.menu a{
-  display:block
-}
-
-.empty{
-  text-align:center;
-  color:#777;
-  padding:30px 10px
-}
-
-.success{
-  color:#087f23
-}
-
-.error{
-  color:#b00020
-}
-
-.comment{
-  background:#f5f6f8;
-  border-radius:12px;
-  padding:10px;
-  margin-top:8px
-}
-
-.comment-name{
-  font-weight:bold
-}
-
-.comment-text{
-  margin-top:5px;
-  white-space:pre-wrap
-}
-
-.job{
-  border:1px solid #e0e4e8;
-  border-radius:15px;
-  padding:14px;
-  margin-bottom:11px
-}
-
-.job-title{
-  font-size:18px;
-  font-weight:800
-}
-
-.job-city,
-.job-salary{
-  margin-top:7px
-}
-
-.job-salary{
-  color:#087f23
-}
-
-.job-description{
-  margin-top:11px;
-  line-height:1.8;
-  white-space:pre-wrap
-}
-
-.post-image{
-  width:100%;
-  max-height:420px;
-  object-fit:cover;
-  border-radius:14px;
-  margin-top:10px
-}
-
-.notice{
-  padding:10px 12px;
-  border-radius:12px;
-  background:#fff8e1;
-  color:#795548;
-  margin-bottom:12px
-}
-
-.theme-btn{
-  background:#f4f6f8;
-  color:#202124
-}
-
-.small{
-  font-size:12px;
-  color:#777
-}
-
-.divider{
-  height:1px;
-  background:#e3e6e9;
-  margin:18px 0
-}
-
-.bottom-nav{
-  position:fixed;
-  bottom:0;
-  left:50%;
-  transform:translateX(-50%);
-  width:100%;
-  max-width:720px;
-  height:67px;
-  background:#fff;
-  border-top:1px solid #ddd;
-  display:flex;
-  justify-content:space-around;
-  align-items:center;
-  z-index:50;
-  box-shadow:0 -3px 12px rgba(0,0,0,.05)
-}
-
-.bottom-nav a{
-  text-align:center;
-  font-size:11px;
-  color:#444;
-  min-width:55px
-}
-
-.bottom-nav span{
-  display:block;
-  font-size:21px;
-  margin-bottom:2px
-}
-
-.hero{
-  padding:8px 0 14px
-}
-
-.hero h1{
-  margin:5px 0 8px;
-  font-size:23px
-}
-
-.hero p{
-  line-height:1.8;
-  color:#666
-}
-
-.badge{
-  display:inline-block;
-  background:#eef3ff;
-  color:#2455c3;
-  border-radius:20px;
-  padding:5px 9px;
-  font-size:11px
-}
-
-@media(max-width:480px){
-  .content{
-    padding:10px
-  }
-
-  .card{
-    border-radius:15px
-  }
-
-  .actions button,
-  .actions .btn{
-    padding:10px 11px
-  }
-}
-
-body.dark{
-  background:#111;
-  color:#eee
-}
-
-body.dark .app,
-body.dark .header,
-body.dark .bottom-nav,
-body.dark input,
-body.dark textarea,
-body.dark select{
-  background:#181818;
-  color:#eee
-}
-
-body.dark .card{
-  background:#1d1d1d;
-  border-color:#333
-}
-
-body.dark .top-actions a{
-  background:#292929;
-  color:#eee
-}
-
-body.dark input,
-body.dark textarea,
-body.dark select{
-  border-color:#444
-}
-
-body.dark .comment,
-body.dark .job{
-  background:#242424;
-  border-color:#3a3a3a
-}
-
-body.dark .email,
-body.dark .small,
-body.dark .stats{
-  color:#aaa
-}
+*{box-sizing:border-box}
+body{margin:0;background:#eef1f5;color:#202124;font-family:Tahoma,Arial,sans-serif}
+.app{width:100%;max-width:720px;min-height:100vh;margin:auto;background:#fff;padding-bottom:${user ? "90px" : "25px"}}
+.header{position:sticky;top:0;z-index:30;background:#fff;border-bottom:1px solid #e4e7eb;padding:13px 15px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.logo{font-weight:800;font-size:19px}
+.title{font-size:17px;font-weight:700}
+.content{padding:14px}
+.card{background:#fff;border:1px solid #e1e5ea;border-radius:18px;padding:15px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.profile-head{display:flex;align-items:center;gap:11px}
+.avatar{width:52px;height:52px;border-radius:50%;background:#202124;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:bold;flex:none}
+.username{font-weight:800;font-size:16px}
+.email{color:#777;font-size:12px;margin-top:4px;direction:ltr;text-align:right}
+.post-text{margin:17px 0;line-height:1.9;white-space:pre-wrap;word-break:break-word}
+.stats{display:flex;gap:14px;color:#666;font-size:13px;flex-wrap:wrap}
+.actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+button,.btn{border:0;border-radius:11px;padding:11px 14px;background:#202124;color:#fff;cursor:pointer;font-size:14px;text-decoration:none;display:inline-block}
+button:hover,.btn:hover{opacity:.9}
+.full{width:100%;margin-top:8px;text-align:center}
+.like{background:#e91e63}.follow{background:#1976d2}.danger{background:#b00020}.green{background:#087f23}
+input,textarea{width:100%;padding:12px;margin:7px 0;border:1px solid #ccd2d9;border-radius:11px;font-size:16px;font-family:Tahoma,Arial,sans-serif;background:#fff}
+textarea{min-height:120px;resize:vertical}
+a{text-decoration:none;color:inherit}
+.top-actions{display:flex;gap:7px;overflow:auto;padding:0 14px 12px}
+.top-actions a{background:#f4f6f8;border-radius:10px;padding:8px 10px;white-space:nowrap;font-size:12px}
+.menu{display:grid;gap:9px}.menu a{display:block}
+.empty{text-align:center;color:#777;padding:30px 10px}
+.success{color:#087f23}.error{color:#b00020}
+.comment{background:#f5f6f8;border-radius:12px;padding:10px;margin-top:8px}
+.comment-name{font-weight:bold}.comment-text{margin-top:5px;white-space:pre-wrap}
+.job{border:1px solid #e0e4e8;border-radius:15px;padding:14px;margin-bottom:11px}
+.job-title{font-size:18px;font-weight:800}.job-city,.job-salary{margin-top:7px}.job-salary{color:#087f23}
+.job-description{margin-top:11px;line-height:1.8;white-space:pre-wrap}
+.post-image{width:100%;max-height:420px;object-fit:cover;border-radius:14px;margin-top:10px}
+.notice{padding:10px 12px;border-radius:12px;background:#fff8e1;color:#795548;margin-bottom:12px}
+.theme-btn{background:#f4f6f8;color:#202124}
+.small{font-size:12px;color:#777}.divider{height:1px;background:#e3e6e9;margin:18px 0}
+.bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:720px;height:67px;background:#fff;border-top:1px solid #ddd;display:flex;justify-content:space-around;align-items:center;z-index:50;box-shadow:0 -3px 12px rgba(0,0,0,.05)}
+.bottom-nav a{text-align:center;font-size:11px;color:#444;min-width:55px}.bottom-nav span{display:block;font-size:21px;margin-bottom:2px}
+.hero{padding:8px 0 14px}.hero h1{margin:5px 0 8px;font-size:23px}.hero p{line-height:1.8;color:#666}
+.badge{display:inline-block;background:#eef3ff;color:#2455c3;border-radius:20px;padding:5px 9px;font-size:11px}
+@media(max-width:480px){.content{padding:10px}.card{border-radius:15px}.actions button,.actions .btn{padding:10px 11px}}
+body.dark{background:#111;color:#eee} body.dark .app,body.dark .header,body.dark .bottom-nav,body.dark input,body.dark textarea{background:#181818;color:#eee} body.dark .card{background:#1d1d1d;border-color:#333} body.dark .top-actions a{background:#292929;color:#eee} body.dark input,body.dark textarea{border-color:#444} body.dark .comment,body.dark .job{background:#242424;border-color:#3a3a3a} body.dark .email,body.dark .small,body.dark .stats{color:#aaa}
 </style>
 </head>
-
 <body>
-
 <div class="app">
-
 <header class="header">
-  <div class="logo">📱 MySocial</div>
+  <div class="logo">📱 برنامه اجتماعی</div>
   <div class="title">${escapeHtml(title)}</div>
 </header>
-
 ${topMenu}
-
-<main class="content">
-${content}
-</main>
-
+<main class="content">${content}</main>
 </div>
-
 ${nav}
-
-<script>
-function toggleTheme(){
-  document.body.classList.toggle("dark");
-  localStorage.setItem(
-    "dark",
-    document.body.classList.contains("dark")
-  );
-}
-
-if(localStorage.getItem("dark")==="true"){
-  document.body.classList.add("dark");
-}
-</script>
-
+<script>function toggleTheme(){document.body.classList.toggle("dark");localStorage.setItem("dark",document.body.classList.contains("dark"));}if(localStorage.getItem("dark")==="true")document.body.classList.add("dark");</script>
 </body>
 </html>`;
 }
 
 async function ensureColumn(table, column, definition) {
-  await pool.query(
-    `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${definition}`
-  );
+  await pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${definition}`);
 }
 
 async function createTables() {
-
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -578,8 +175,7 @@ async function createTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions (
       session_id TEXT PRIMARY KEY,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -587,66 +183,43 @@ async function createTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS posts (
       id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       content TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
-  await ensureColumn("posts","content","TEXT");
-  await ensureColumn("posts","image_url","TEXT");
-  await ensureColumn(
-    "posts",
-    "media_type",
-    "TEXT DEFAULT 'image'"
-  );
-  await ensureColumn("posts","location","TEXT");
-  await ensureColumn(
-    "posts",
-    "archived",
-    "BOOLEAN DEFAULT FALSE"
-  );
-  await ensureColumn(
-    "posts",
-    "pinned",
-    "BOOLEAN DEFAULT FALSE"
-  );
-
+  // Compatibility with the older database that used posts.text.
+  await ensureColumn("posts", "content", "TEXT");
+  await ensureColumn("posts", "image_url", "TEXT");
+  await ensureColumn("posts", "media_type", "TEXT DEFAULT 'image'");
+  await ensureColumn("posts", "location", "TEXT");
+  await ensureColumn("posts", "archived", "BOOLEAN DEFAULT FALSE");
+  await ensureColumn("posts", "pinned", "BOOLEAN DEFAULT FALSE");
   try {
     await pool.query(`
       UPDATE posts
       SET content = text
       WHERE (content IS NULL OR content = '')
-      AND EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_name='posts'
-        AND column_name='text'
-      )
+        AND EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='posts' AND column_name='text'
+        )
     `);
-  } catch(e) {
+    console.log("Old posts.text data copied to posts.content.");
+  } catch (e) {
     console.log("Old posts.text migration skipped.");
   }
 
-  await pool.query(`
-    UPDATE posts
-    SET content=''
-    WHERE content IS NULL
-  `);
-
-  await pool.query(`
-    ALTER TABLE posts
-    ALTER COLUMN content SET NOT NULL
-  `);
+  await pool.query(`UPDATE posts SET content = '' WHERE content IS NULL`);
+  await pool.query(`UPDATE posts SET content = '' WHERE content IS NULL`);
+  await pool.query(`ALTER TABLE posts ALTER COLUMN content SET NOT NULL`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS likes (
       id SERIAL PRIMARY KEY,
-      post_id INTEGER NOT NULL
-        REFERENCES posts(id) ON DELETE CASCADE,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
+      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       UNIQUE(post_id,user_id)
     )
   `);
@@ -654,10 +227,8 @@ async function createTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS comments (
       id SERIAL PRIMARY KEY,
-      post_id INTEGER NOT NULL
-        REFERENCES posts(id) ON DELETE CASCADE,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
+      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       comment TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -666,10 +237,8 @@ async function createTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS follows (
       id SERIAL PRIMARY KEY,
-      follower_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
-      following_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
+      follower_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      following_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       UNIQUE(follower_id,following_id)
     )
   `);
@@ -677,8 +246,7 @@ async function createTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS jobs (
       id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       title TEXT NOT NULL,
       city TEXT NOT NULL,
       salary TEXT NOT NULL,
@@ -690,22 +258,19 @@ async function createTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS messages (
       id SERIAL PRIMARY KEY,
-      sender_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
-      receiver_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
+      sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       message TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
+  // New features.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bookmarks (
       id SERIAL PRIMARY KEY,
-      post_id INTEGER NOT NULL
-        REFERENCES posts(id) ON DELETE CASCADE,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
+      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(post_id,user_id)
     )
@@ -714,10 +279,8 @@ async function createTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS blocked_users (
       id SERIAL PRIMARY KEY,
-      blocker_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
-      blocked_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
+      blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       UNIQUE(blocker_id,blocked_id)
     )
   `);
@@ -725,12 +288,9 @@ async function createTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS reports (
       id SERIAL PRIMARY KEY,
-      reporter_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
-      reported_user_id INTEGER
-        REFERENCES users(id) ON DELETE CASCADE,
-      post_id INTEGER
-        REFERENCES posts(id) ON DELETE CASCADE,
+      reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reported_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
       reason TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -739,5070 +299,384 @@ async function createTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS notifications (
       id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
-      actor_id INTEGER
-        REFERENCES users(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      actor_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
       type TEXT NOT NULL,
-      post_id INTEGER
-        REFERENCES posts(id) ON DELETE CASCADE,
+      post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
       message TEXT NOT NULL,
       is_read BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
-
-  await ensureColumn(
-    "notifications",
-    "message",
-    "TEXT"
-  );
-
-  await ensureColumn(
-    "notifications",
-    "is_read",
-    "BOOLEAN DEFAULT FALSE"
-  );
+  await ensureColumn("notifications", "message", "TEXT");
+  await ensureColumn("notifications", "is_read", "BOOLEAN DEFAULT FALSE");
+  try {
+    await pool.query(`DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='notifications' AND column_name='read') THEN UPDATE notifications SET is_read = read WHERE is_read IS NULL; END IF; END $$;`);
+  } catch (e) { console.log("Old notifications migration skipped."); }
+  await pool.query(`UPDATE notifications SET message='' WHERE message IS NULL`);
+  await pool.query(`UPDATE notifications SET is_read=FALSE WHERE is_read IS NULL`);
+  await pool.query(`ALTER TABLE notifications ALTER COLUMN message SET NOT NULL`);
 
   try {
-    await pool.query(`
-      DO $$
-      BEGIN
-        IF EXISTS (
-          SELECT 1
-          FROM information_schema.columns
-          WHERE table_name='notifications'
-          AND column_name='read'
-        )
-        THEN
-          UPDATE notifications
-          SET is_read = read
-          WHERE is_read IS NULL;
-        END IF;
-      END
-      $$;
-    `);
-  } catch(e) {
-    console.log(
-      "Old notifications migration skipped."
-    );
-  }
+    await pool.query(`DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='saved_posts') THEN
+        INSERT INTO bookmarks(user_id,post_id) SELECT user_id,post_id FROM saved_posts ON CONFLICT DO NOTHING;
+      END IF;
+      IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='blocks') THEN
+        INSERT INTO blocked_users(blocker_id,blocked_id) SELECT blocker_id,blocked_id FROM blocks ON CONFLICT DO NOTHING;
+      END IF;
+    END $$;`);
+  } catch (e) { console.log("Legacy bookmark/block migration skipped."); }
 
+
+  // Instagram-like expansion: stories, reels, highlights, analytics, privacy,
+  // creator monetization ledger and advertising management.
+  await pool.query(`CREATE TABLE IF NOT EXISTS stories (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    media_url TEXT,
+    text TEXT DEFAULT '',
+    media_type TEXT DEFAULT 'image',
+    expires_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL '24 hours'),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS story_views (
+    story_id INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(story_id,user_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS story_reactions (
+    story_id INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reaction TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(story_id,user_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS highlights (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    cover_url TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS highlight_items (
+    highlight_id INTEGER NOT NULL REFERENCES highlights(id) ON DELETE CASCADE,
+    story_id INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+    PRIMARY KEY(highlight_id,story_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS reels (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    media_url TEXT NOT NULL,
+    caption TEXT DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS reel_likes (
+    reel_id INTEGER NOT NULL REFERENCES reels(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(reel_id,user_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS reel_comments (
+    id SERIAL PRIMARY KEY,
+    reel_id INTEGER NOT NULL REFERENCES reels(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    comment TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS reel_views (
+    id SERIAL PRIMARY KEY,
+    reel_id INTEGER NOT NULL REFERENCES reels(id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS post_views (
+    id SERIAL PRIMARY KEY,
+    post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS shares (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
+    reel_id INTEGER REFERENCES reels(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CHECK((post_id IS NOT NULL) OR (reel_id IS NOT NULL))
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS hashtags (
+    id SERIAL PRIMARY KEY,
+    tag TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS hashtag_posts (
+    hashtag_id INTEGER NOT NULL REFERENCES hashtags(id) ON DELETE CASCADE,
+    post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    PRIMARY KEY(hashtag_id,post_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS hashtag_reels (
+    hashtag_id INTEGER NOT NULL REFERENCES hashtags(id) ON DELETE CASCADE,
+    reel_id INTEGER NOT NULL REFERENCES reels(id) ON DELETE CASCADE,
+    PRIMARY KEY(hashtag_id,reel_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS collections (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id,name)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS collection_items (
+    collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    PRIMARY KEY(collection_id,post_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS follow_requests (
+    id SERIAL PRIMARY KEY,
+    requester_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    target_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(requester_id,target_id),
+    CHECK(requester_id<>target_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS restrictions (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    restricted_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY(user_id,restricted_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS mutes (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    muted_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY(user_id,muted_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS close_friends (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    friend_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY(user_id,friend_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS user_settings (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    is_private BOOLEAN DEFAULT FALSE,
+    message_policy TEXT DEFAULT 'everyone',
+    mention_policy TEXT DEFAULT 'everyone',
+    tag_policy TEXT DEFAULT 'everyone',
+    show_activity BOOLEAN DEFAULT TRUE,
+    allow_story_replies BOOLEAN DEFAULT TRUE,
+    notifications_enabled BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS ad_accounts (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    business_name TEXT DEFAULT '',
+    balance NUMERIC(14,2) DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS ads (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    body TEXT DEFAULT '',
+    media_url TEXT,
+    target_url TEXT,
+    budget NUMERIC(14,2) DEFAULT 0,
+    spent NUMERIC(14,2) DEFAULT 0,
+    status TEXT DEFAULT 'draft',
+    starts_at TIMESTAMP,
+    ends_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS ad_events (
+    id SERIAL PRIMARY KEY,
+    ad_id INTEGER NOT NULL REFERENCES ads(id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    event_type TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS creator_accounts (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    enabled BOOLEAN DEFAULT TRUE,
+    balance NUMERIC(14,2) DEFAULT 0,
+    lifetime_earned NUMERIC(14,2) DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS creator_transactions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    amount NUMERIC(14,2) NOT NULL,
+    description TEXT DEFAULT '',
+    status TEXT DEFAULT 'completed',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS creator_payouts (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount NUMERIC(14,2) NOT NULL,
+    status TEXT DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS creator_subscriptions (
+    id SERIAL PRIMARY KEY,
+    creator_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    subscriber_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount NUMERIC(14,2) DEFAULT 0,
+    status TEXT DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(creator_id,subscriber_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS subscription_plans (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    price NUMERIC(14,2) NOT NULL DEFAULT 0,
+    duration_days INTEGER NOT NULL DEFAULT 30,
+    features TEXT DEFAULT '',
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS user_subscriptions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    plan_id INTEGER NOT NULL REFERENCES subscription_plans(id) ON DELETE RESTRICT,
+    status TEXT NOT NULL DEFAULT 'active',
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    auto_renew BOOLEAN DEFAULT FALSE,
+    UNIQUE(user_id,plan_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS wallet_accounts (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    balance NUMERIC(14,2) NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS wallet_transactions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    amount NUMERIC(14,2) NOT NULL,
+    reference_type TEXT,
+    reference_id INTEGER,
+    description TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS payment_orders (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount NUMERIC(14,2) NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    purpose TEXT NOT NULL,
+    reference_id INTEGER,
+    provider TEXT DEFAULT 'external',
+    provider_payment_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    paid_at TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS paid_content (
+    id SERIAL PRIMARY KEY,
+    creator_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
+    reel_id INTEGER REFERENCES reels(id) ON DELETE CASCADE,
+    price NUMERIC(14,2) NOT NULL DEFAULT 0,
+    title TEXT DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CHECK ((post_id IS NOT NULL) OR (reel_id IS NOT NULL))
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS paid_content_purchases (
+    id SERIAL PRIMARY KEY,
+    content_id INTEGER NOT NULL REFERENCES paid_content(id) ON DELETE CASCADE,
+    buyer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount NUMERIC(14,2) NOT NULL,
+    payment_order_id INTEGER REFERENCES payment_orders(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(content_id,buyer_id)
+  )`);
+  await pool.query(`INSERT INTO subscription_plans(name,description,price,duration_days,features)
+    SELECT 'MySocial Premium','امکانات ویژه حساب',4.99,30,'بدون تبلیغ · نشان ویژه · امکانات بیشتر'
+    WHERE NOT EXISTS (SELECT 1 FROM subscription_plans)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_active ON user_subscriptions(user_id,status,expires_at)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_wallet_transactions_user ON wallet_transactions(user_id,created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_orders_user ON payment_orders(user_id,created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_paid_content_creator ON paid_content(creator_id,created_at DESC)`);
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS profile_visits (
+    id SERIAL PRIMARY KEY,
+    profile_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    visitor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS login_activity (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    ip TEXT,
+    user_agent TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_stories_expiry ON stories(expires_at)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_reels_created ON reels(created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_post_views_post ON post_views(post_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_ad_events_ad ON ad_events(ad_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id,created_at DESC)`);
+
+
+  await pool.query(`CREATE TABLE IF NOT EXISTS live_streams (
+    id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL DEFAULT 'پخش زنده MySocial', status TEXT NOT NULL DEFAULT 'live',
+    stream_key TEXT UNIQUE NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, ended_at TIMESTAMP
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS live_viewers (
+    live_id INTEGER NOT NULL REFERENCES live_streams(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(live_id,user_id)
+  )`);
+  await pool.query(`CREATE TABLE IF NOT EXISTS live_comments (
+    id SERIAL PRIMARY KEY, live_id INTEGER NOT NULL REFERENCES live_streams(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, comment TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_live_streams_status ON live_streams(status,created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_live_comments_live ON live_comments(live_id,created_at DESC)`);
+  console.log("Database tables checked and repaired successfully.");
+}
+
+async function createSession(userId) {
+  const id = crypto.randomBytes(32).toString("hex");
+  await pool.query(`INSERT INTO sessions(session_id,user_id) VALUES($1,$2)`, [id,userId]);
+  return id;
+}
+
+async function getSession(req) {
+  const sid = parseCookies(req).sessionId;
+  if (!sid) return null;
+  const r = await pool.query(`
+    SELECT users.id,users.name,users.email
+    FROM sessions JOIN users ON users.id=sessions.user_id
+    WHERE sessions.session_id=$1
+  `,[sid]);
+  return r.rows[0] || null;
+}
+
+async function notify(userId, actorId, type, postId, message) {
+  if (!userId || userId === actorId) return;
   await pool.query(`
-    UPDATE notifications
-    SET message=''
-    WHERE message IS NULL
-  `);
-
-  await pool.query(`
-    UPDATE notifications
-    SET is_read=FALSE
-    WHERE is_read IS NULL
-  `);
-
-  await pool.query(`
-    ALTER TABLE notifications
-    ALTER COLUMN message SET NOT NULL
-  `);
-
-  try {
-    await pool.query(`
-      DO $$
-      BEGIN
-
-        IF EXISTS (
-          SELECT 1
-          FROM information_schema.tables
-          WHERE table_name='saved_posts'
-        )
-        THEN
-          INSERT INTO bookmarks(user_id,post_id)
-          SELECT user_id,post_id
-          FROM saved_posts
-          ON CONFLICT DO NOTHING;
-        END IF;
-
-        IF EXISTS (
-          SELECT 1
-          FROM information_schema.tables
-          WHERE table_name='blocks'
-        )
-        THEN
-          INSERT INTO blocked_users(blocker_id,blocked_id)
-          SELECT blocker_id,blocked_id
-          FROM blocks
-          ON CONFLICT DO NOTHING;
-        END IF;
-
-      END
-      $$;
-    `);
-  } catch(e) {
-    console.log(
-      "Legacy bookmark/block migration skipped."
-    );
-  }
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS stories (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
-      media_url TEXT,
-      text TEXT DEFAULT '',
-      media_type TEXT DEFAULT 'image',
-      expires_at TIMESTAMP NOT NULL
-        DEFAULT (
-          CURRENT_TIMESTAMP + INTERVAL '24 hours'
-        ),
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS story_views (
-      story_id INTEGER NOT NULL
-        REFERENCES stories(id) ON DELETE CASCADE,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY(story_id,user_id)
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS story_reactions (
-      story_id INTEGER NOT NULL
-        REFERENCES stories(id) ON DELETE CASCADE,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
-      reaction TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY(story_id,user_id)
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS highlights (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
-      title TEXT NOT NULL,
-      cover_url TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS highlight_items (
-      highlight_id INTEGER NOT NULL
-        REFERENCES highlights(id) ON DELETE CASCADE,
-      story_id INTEGER NOT NULL
-        REFERENCES stories(id) ON DELETE CASCADE,
-      PRIMARY KEY(highlight_id,story_id)
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS reels (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
-      media_url TEXT NOT NULL,
-      caption TEXT DEFAULT '',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS reel_likes (
-      reel_id INTEGER NOT NULL
-        REFERENCES reels(id) ON DELETE CASCADE,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY(reel_id,user_id)
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS reel_comments (
-      id SERIAL PRIMARY KEY,
-      reel_id INTEGER NOT NULL
-        REFERENCES reels(id) ON DELETE CASCADE,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
-      comment TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS reel_views (
-      id SERIAL PRIMARY KEY,
-      reel_id INTEGER NOT NULL
-        REFERENCES reels(id) ON DELETE CASCADE,
-      user_id INTEGER
-        REFERENCES users(id) ON DELETE SET NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS post_views (
-      id SERIAL PRIMARY KEY,
-      post_id INTEGER NOT NULL
-        REFERENCES posts(id) ON DELETE CASCADE,
-      user_id INTEGER
-        REFERENCES users(id) ON DELETE SET NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS shares (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
-      post_id INTEGER
-        REFERENCES posts(id) ON DELETE CASCADE,
-      reel_id INTEGER
-        REFERENCES reels(id) ON DELETE CASCADE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      CHECK(
-        (post_id IS NOT NULL)
-        OR
-        (reel_id IS NOT NULL)
-      )
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS hashtags (
-      id SERIAL PRIMARY KEY,
-      tag TEXT UNIQUE NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS hashtag_posts (
-      hashtag_id INTEGER NOT NULL
-        REFERENCES hashtags(id) ON DELETE CASCADE,
-      post_id INTEGER NOT NULL
-        REFERENCES posts(id) ON DELETE CASCADE,
-      PRIMARY KEY(hashtag_id,post_id)
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS hashtag_reels (
-      hashtag_id INTEGER NOT NULL
-        REFERENCES hashtags(id) ON DELETE CASCADE,
-      reel_id INTEGER NOT NULL
-        REFERENCES reels(id) ON DELETE CASCADE,
-      PRIMARY KEY(hashtag_id,reel_id)
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS collections (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL
-        REFERENCES users(id) ON DELETE CASCADE,
-      name TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(user_id,name)
-    )
-  `);
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS collection_items (
-      collection_id INTEGER NOT NULL
-        REFERENCES collections(id) ON DELETE CASCADE,
-      post_id INTEGER NOT NULL
-        REFERENCES posts(id) ON DELETE CASCADE,
-      PRIMARY KEY(collection_id,post_id)
-    )
-  `);
-
-  if(
-    req.method==="GET" &&
-    path==="/logout"
-  ) {
-
-    const sid =
-      parseCookies(req).sessionId;
-
-    if(sid) {
-      await pool.query(
-        `
-        DELETE FROM sessions
-        WHERE session_id=$1
-        `,
-        [sid]
-      );
-    }
-
-    return redirect(res, "/login");
-                   }
-
-        redirect(
-          res,
-          "/",
-          "sessionId=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax"
-        );
-
-        return;
-      }
-
-      if(
-        req.method==="GET" &&
-        path==="/new-post"
-      ) {
-
-        sendHtml(
-          res,
-          200,
-          "پست جدید",
-          `
-          <div class="card">
-
-            <form
-              method="POST"
-              action="/new-post"
-            >
-
-              <textarea
-                name="content"
-                maxlength="5000"
-                placeholder="چه چیزی می‌خواهی منتشر کنی؟"
-                required
-              ></textarea>
-
-              <input
-                name="image_url"
-                type="url"
-                placeholder="لینک تصویر، اختیاری"
-              >
-
-              <input
-                name="location"
-                maxlength="200"
-                placeholder="موقعیت، اختیاری"
-              >
-
-              <button class="full">
-                📤 انتشار
-              </button>
-
-            </form>
-
-          </div>
-          `,
-          user
-        );
-
-        return;
-      }
-
-      if(
-        req.method==="POST" &&
-        path==="/new-post"
-      ) {
-
-        const d = await readBody(req);
-
-        const content =
-          (d.get("content") || "").trim();
-
-        const imageUrl =
-          (d.get("image_url") || "").trim();
-
-        const location =
-          (d.get("location") || "").trim();
-
-        if(!content) {
-
-          sendHtml(
-            res,
-            400,
-            "خطا",
-            `
-            <p class="error">
-              متن پست نمی‌تواند خالی باشد.
-            </p>
-            `,
-            user
-          );
-
-          return;
-        }
-
-        const r =
-          await pool.query(
-            `
-            INSERT INTO posts
-              (user_id,content,image_url,location)
-            VALUES
-              ($1,$2,$3,$4)
-            RETURNING id
-            `,
-            [
-              user.id,
-              content,
-              imageUrl || null,
-              location || null
-            ]
-          );
-
-        const postId =
-          r.rows[0].id;
-
-        /*
-         * ثبت هشتگ‌های پست
-         */
-        const tags =
-          content.match(/#[\p{L}\p{N}_]+/gu) || [];
-
-        for(const rawTag of tags) {
-
-          const tag =
-            rawTag
-              .slice(1)
-              .toLowerCase()
-              .slice(0,100);
-
-          if(!tag) continue;
-
-          const tagResult =
-            await pool.query(
-              `
-              INSERT INTO hashtags(tag)
-              VALUES($1)
-              ON CONFLICT(tag)
-              DO UPDATE SET tag=EXCLUDED.tag
-              RETURNING id
-              `,
-              [tag]
-            );
-
-          await pool.query(
-            `
-            INSERT INTO hashtag_posts
-              (hashtag_id,post_id)
-            VALUES
-              ($1,$2)
-            ON CONFLICT DO NOTHING
-            `,
-            [
-              tagResult.rows[0].id,
-              postId
-            ]
-          );
-        }
-
-        redirect(res,"/");
-        return;
-      }
-
-      if(
-        req.method==="GET" &&
-        path==="/post"
-      ) {
-
-        const id =
-          Number(url.searchParams.get("id"));
-
-        if(!Number.isInteger(id) || id <= 0) {
-
-          sendHtml(
-            res,
-            400,
-            "خطا",
-            `<p class="error">شناسه پست نامعتبر است.</p>`,
-            user
-          );
-
-          return;
-        }
-
-        const postResult =
-          await pool.query(
-            `
-            SELECT
-              p.id,
-              p.content,
-              p.image_url,
-              p.location,
-              p.created_at,
-              u.id AS user_id,
-              u.name,
-              u.email,
-
-              (
-                SELECT COUNT(*)
-                FROM likes l
-                WHERE l.post_id=p.id
-              ) AS like_count,
-
-              EXISTS(
-                SELECT 1
-                FROM likes l2
-                WHERE l2.post_id=p.id
-                AND l2.user_id=$2
-              ) AS liked,
-
-              EXISTS(
-                SELECT 1
-                FROM bookmarks b
-                WHERE b.post_id=p.id
-                AND b.user_id=$2
-              ) AS bookmarked
-
-            FROM posts p
-            JOIN users u
-              ON u.id=p.user_id
-
-            WHERE p.id=$1
-            `,
-            [id,user.id]
-          );
-
-        if(!postResult.rows.length) {
-
-          sendHtml(
-            res,
-            404,
-            "پست پیدا نشد",
-            `
-            <div class="card empty">
-              این پست وجود ندارد یا حذف شده است.
-            </div>
-            `,
-            user
-          );
-
-          return;
-        }
-
-        const p =
-          postResult.rows[0];
-
-        const comments =
-          await pool.query(
-            `
-            SELECT
-              c.id,
-              c.comment,
-              c.created_at,
-              u.id AS user_id,
-              u.name
-            FROM comments c
-            JOIN users u
-              ON u.id=c.user_id
-            WHERE c.post_id=$1
-            ORDER BY c.created_at ASC
-            LIMIT 200
-            `,
-            [id]
-          );
-
-        /*
-         * ثبت بازدید
-         */
-        await pool.query(
-          `
-          INSERT INTO post_views
-            (post_id,user_id)
-          VALUES
-            ($1,$2)
-          `,
-          [id,user.id]
-        );
-
-        let html = `
-          <article class="card">
-
-            <div class="profile-head">
-
-              <div class="avatar">
-                ${escapeHtml(
-                  p.name.charAt(0)
-                )}
-              </div>
-
-              <div>
-
-                <div class="username">
-                  ${escapeHtml(p.name)}
-                </div>
-
-                <div class="email">
-                  ${escapeHtml(p.email)}
-                </div>
-
-              </div>
-
-            </div>
-
-            <div class="post-text">
-              ${escapeHtml(p.content)}
-            </div>
-
-            ${
-              p.image_url
-                ? `
-                  <img
-                    class="post-image"
-                    src="${escapeHtml(p.image_url)}"
-                    alt="post image"
-                  >
-                `
-                : ""
-            }
-
-            ${
-              p.location
-                ? `
-                  <div class="small">
-                    📍 ${escapeHtml(p.location)}
-                  </div>
-                `
-                : ""
-            }
-
-            <div class="stats">
-              ❤️ ${p.like_count}
-            </div>
-
-            <div class="actions">
-
-              <a href="/like?post=${p.id}">
-                <button class="like">
-                  ${
-                    p.liked
-                      ? "💔 برداشتن لایک"
-                      : "❤️ لایک"
-                  }
-                </button>
-              </a>
-
-              <a href="/bookmark?post=${p.id}">
-                <button>
-                  ${
-                    p.bookmarked
-                      ? "🔖 ذخیره‌شده"
-                      : "🔖 ذخیره"
-                  }
-                </button>
-              </a>
-
-              <a href="/share?post=${p.id}">
-                <button>
-                  🔗 اشتراک
-                </button>
-              </a>
-
-              <a href="/report?post=${p.id}">
-                <button class="danger">
-                  🚩 گزارش
-                </button>
-              </a>
-
-            </div>
-
-          </article>
-
-          <div class="card">
-
-            <h3>
-              💬 نظرها
-            </h3>
-
-            <form
-              method="POST"
-              action="/comment"
-            >
-
-              <input
-                type="hidden"
-                name="post_id"
-                value="${p.id}"
-              >
-
-              <textarea
-                name="comment"
-                maxlength="2000"
-                placeholder="نظر خود را بنویس..."
-                required
-              ></textarea>
-
-              <button class="full">
-                ارسال نظر
-              </button>
-
-            </form>
-
-          </div>
-        `;
-
-        if(!comments.rows.length) {
-
-          html += `
-            <div class="card empty">
-              هنوز نظری ثبت نشده است.
-            </div>
-          `;
-
-        } else {
-
-          for(const c of comments.rows) {
-
-            html += `
-              <div class="comment">
-
-                <div class="comment-name">
-                  ${escapeHtml(c.name)}
-                </div>
-
-                <div class="comment-text">
-                  ${escapeHtml(c.comment)}
-                </div>
-
-              </div>
-            `;
-          }
-        }
-
-        sendHtml(
-          res,
-          200,
-          "پست",
-          html,
-          user
-        );
-
-        return;
-      }
-
-      if(
-        req.method==="GET" &&
-        path==="/like"
-      ) {
-
-        const postId =
-          Number(url.searchParams.get("post"));
-
-        if(
-          !Number.isInteger(postId) ||
-          postId <= 0
-        ) {
-          redirect(res,"/");
-          return;
-        }
-
-        const exists =
-          await pool.query(
-            `
-            SELECT 1
-            FROM likes
-            WHERE post_id=$1
-            AND user_id=$2
-            `,
-            [postId,user.id]
-          );
-
-        if(exists.rows.length) {
-
-          await pool.query(
-            `
-            DELETE FROM likes
-            WHERE post_id=$1
-            AND user_id=$2
-            `,
-            [postId,user.id]
-          );
-
-        } else {
-
-          await pool.query(
-            `
-            INSERT INTO likes
-              (post_id,user_id)
-            VALUES
-              ($1,$2)
-            ON CONFLICT DO NOTHING
-            `,
-            [postId,user.id]
-          );
-
-          const owner =
-            await pool.query(
-              `
-              SELECT user_id
-              FROM posts
-              WHERE id=$1
-              `,
-              [postId]
-            );
-
-          if(owner.rows.length) {
-
-            await notify(
-              owner.rows[0].user_id,
-              user.id,
-              "like",
-              postId,
-              `${user.name} پست شما را پسندید.`
-            );
-          }
-        }
-
-        redirect(
-          res,
-          `/post?id=${postId}`
-        );
-
-        return;
-      }
-
-      if(
-        req.method==="GET" &&
-        path==="/bookmark"
-      ) {
-
-        const postId =
-          Number(url.searchParams.get("post"));
-
-        if(
-          !Number.isInteger(postId) ||
-          postId <= 0
-        ) {
-          redirect(res,"/");
-          return;
-        }
-
-        const exists =
-          await pool.query(
-            `
-            SELECT 1
-            FROM bookmarks
-            WHERE post_id=$1
-            AND user_id=$2
-            `,
-            [postId,user.id]
-          );
-
-        if(exists.rows.length) {
-
-          await pool.query(
-            `
-            DELETE FROM bookmarks
-            WHERE post_id=$1
-            AND user_id=$2
-            `,
-            [postId,user.id]
-          );
-
-        } else {
-
-          await pool.query(
-            `
-            INSERT INTO bookmarks
-              (post_id,user_id)
-            VALUES
-              ($1,$2)
-            ON CONFLICT DO NOTHING
-            `,
-            [postId,user.id]
-          );
-        }
-
-        redirect(
-          res,
-          `/post?id=${postId}`
-        );
-
-        return;
-      }
-
-      if(
-        req.method==="POST" &&
-        path==="/comment"
-      ) {
-
-        const d = await readBody(req);
-
-        const postId =
-          Number(d.get("post_id"));
-
-        const comment =
-          (d.get("comment") || "").trim();
-
-        if(
-          !Number.isInteger(postId) ||
-          postId <= 0 ||
-          !comment
-        ) {
-
-          sendHtml(
-            res,
-            400,
-            "خطا",
-            `<p class="error">اطلاعات نظر نامعتبر است.</p>`,
-            user
-          );
-
-          return;
-        }
-
-        const post =
-          await pool.query(
-            `
-            SELECT user_id
-            FROM posts
-            WHERE id=$1
-            `,
-            [postId]
-          );
-
-        if(!post.rows.length) {
-
-          sendHtml(
-            res,
-            404,
-            "خطا",
-            `<p class="error">پست پیدا نشد.</p>`,
-            user
-          );
-
-          return;
-        }
-
-        await pool.query(
-          `
-          INSERT INTO comments
-            (post_id,user_id,comment)
-          VALUES
-            ($1,$2,$3)
-          `,
-          [
-            postId,
-            user.id,
-            comment
-          ]
-        );
-
-        await notify(
-          post.rows[0].user_id,
-          user.id,
-          "comment",
-          postId,
-          `${user.name} روی پست شما نظر گذاشت.`
-        );
-
-        redirect(
-          res,
-          `/post?id=${postId}`
-        );
-
-        return;
-      }
-
-      if(
-        req.method==="GET" &&
-        path==="/share"
-      ) {
-
-        const postId =
-          Number(url.searchParams.get("post"));
-
-        if(
-          !Number.isInteger(postId) ||
-          postId <= 0
-        ) {
-          redirect(res,"/");
-          return;
-        }
-
-        const post =
-          await pool.query(
-            `
-            SELECT id,user_id
-            FROM posts
-            WHERE id=$1
-            `,
-            [postId]
-          );
-
-        if(!post.rows.length) {
-
-          sendHtml(
-            res,
-            404,
-            "خطا",
-            `<p class="error">پست پیدا نشد.</p>`,
-            user
-          );
-
-          return;
-        }
-
-        await pool.query(
-          `
-          INSERT INTO shares
-            (user_id,post_id)
-          VALUES
-            ($1,$2)
-          `,
-          [user.id,postId]
-        );
-
-        await notify(
-          post.rows[0].user_id,
-          user.id,
-          "share",
-          postId,
-          `${user.name} پست شما را به اشتراک گذاشت.`
-        );
-
-        sendHtml(
-          res,
-          200,
-          "اشتراک‌گذاری",
-          `
-          <div class="card">
-
-            <h2>
-              🔗 اشتراک‌گذاری ثبت شد
-            </h2>
-
-            <p>
-              این اشتراک‌گذاری در حساب شما ثبت شد.
-            </p>
-
-            <a href="/post?id=${postId}">
-              <button class="full">
-                بازگشت به پست
-              </button>
-            </a>
-
-          </div>
-          `,
-          user
-        );
-
-        return;
-      }
-
-      if(
-        req.method==="GET" &&
-        path==="/search"
-      ) {
-
-        const q =
-          (url.searchParams.get("q") || "")
-            .trim()
-            .slice(0,100);
-
-        let html = `
-          <div class="card">
-
-            <form method="GET" action="/search">
-
-              <input
-                name="q"
-                value="${escapeHtml(q)}"
-                placeholder="جستجوی کاربر یا هشتگ..."
-              >
-
-              <button class="full">
-                🔎 جستجو
-              </button>
-
-            </form>
-
-          </div>
-        `;
-
-        if(q) {
-
-          const users =
-            await pool.query(
-              `
-              SELECT
-                id,
-                name,
-                email
-              FROM users
-              WHERE
-                name ILIKE $1
-                OR email ILIKE $1
-              ORDER BY name
-              LIMIT 30
-              `,
-              [`%${q}%`]
-            );
-
-          const cleanTag =
-            q.startsWith("#")
-              ? q.slice(1)
-              : q;
-
-          const hashtags =
-            await pool.query(
-              `
-              SELECT
-                h.id,
-                h.tag,
-                COUNT(hp.post_id) AS post_count
-              FROM hashtags h
-              LEFT JOIN hashtag_posts hp
-                ON hp.hashtag_id=h.id
-              WHERE h.tag ILIKE $1
-              GROUP BY h.id,h.tag
-              ORDER BY post_count DESC
-              LIMIT 30
-              `,
-              [`%${cleanTag}%`]
-            );
-
-          html += `
-            <div class="card">
-
-              <h3>
-                👤 کاربران
-              </h3>
-          `;
-
-          if(!users.rows.length) {
-
-            html += `
-              <div class="empty">
-                کاربری پیدا نشد.
-              </div>
-            `;
-
-          } else {
-
-            for(const u of users.rows) {
-
-              html += `
-                <div class="comment">
-
-                  <a href="/profile?id=${u.id}">
-                    <b>
-                      ${escapeHtml(u.name)}
-                    </b>
-                  </a>
-
-                  <div class="small">
-                    ${escapeHtml(u.email)}
-                  </div>
-
-                </div>
-              `;
-            }
-          }
-
-          html += `
-            </div>
-
-            <div class="card">
-
-              <h3>
-                #️⃣ هشتگ‌ها
-              </h3>
-          `;
-
-          if(!hashtags.rows.length) {
-
-            html += `
-              <div class="empty">
-                هشتگی پیدا نشد.
-              </div>
-            `;
-
-          } else {
-
-            for(const h of hashtags.rows) {
-
-              html += `
-                <div class="comment">
-
-                  <a href="/hashtag?tag=${encodeURIComponent(h.tag)}">
-                    <b>
-                      #${escapeHtml(h.tag)}
-                    </b>
-                  </a>
-
-                  <div class="small">
-                    ${h.post_count} پست
-                  </div>
-
-                </div>
-              `;
-            }
-          }
-
-          html += `
-            </div>
-          `;
-        }
-
-        sendHtml(
-          res,
-          200,
-          "جستجو",
-          html,
-          user
-        );
-
-        return;
-      }
-
-      if(
-        req.method==="GET" &&
-        path==="/hashtag"
-      ) {
-
-        const tag =
-          (url.searchParams.get("tag") || "")
-            .trim()
-            .replace(/^#/,"")
-            .toLowerCase()
-            .slice(0,100);
-
-        if(!tag) {
-
-          redirect(res,"/search");
-          return;
-        }
-
-        const posts =
-          await pool.query(
-            `
-            SELECT
-              p.id,
-              p.content,
-              p.image_url,
-              p.created_at,
-              u.name
-            FROM hashtag_posts hp
-            JOIN hashtags h
-              ON h.id=hp.hashtag_id
-            JOIN posts p
-              ON p.id=hp.post_id
-            JOIN users u
-              ON u.id=p.user_id
-            WHERE h.tag=$1
-            ORDER BY p.created_at DESC
-            LIMIT 100
-            `,
-            [tag]
-          );
-
-        let html = `
-          <div class="card">
-
-            <h2>
-              #${escapeHtml(tag)}
-            </h2>
-
-            <div class="small">
-              ${posts.rows.length} نتیجه
-            </div>
-
-          </div>
-        `;
-
-        for(const p of posts.rows) {
-
-          html += `
-            <article class="card">
-
-              <div class="username">
-                ${escapeHtml(p.name)}
-              </div>
-
-              <div class="post-text">
-                ${escapeHtml(p.content)}
-              </div>
-
-              ${
-                p.image_url
-                  ? `
-                    <img
-                      class="post-image"
-                      src="${escapeHtml(p.image_url)}"
-                    >
-                  `
-                  : ""
-              }
-
-              <a href="/post?id=${p.id}">
-                <button class="full">
-                  مشاهده پست
-                </button>
-              </a>
-
-            </article>
-          `;
-        }
-
-        sendHtml(
-          res,
-          200,
-          `#${tag}`,
-          html,
-          user
-        );
-
-        return;
-      }    if (req.method === "GET" && path === "/stories") {
-      await pool.query(`DELETE FROM stories WHERE expires_at < CURRENT_TIMESTAMP`);
-
-      const r = await pool.query(`
-        SELECT
-          s.*,
-          u.name,
-          u.email,
-          (SELECT COUNT(*) FROM story_views v WHERE v.story_id=s.id)::int AS view_count,
-          EXISTS(
-            SELECT 1 FROM story_views v2
-            WHERE v2.story_id=s.id AND v2.user_id=$1
-          ) AS viewed
-        FROM stories s
-        JOIN users u ON u.id=s.user_id
-        WHERE s.expires_at>CURRENT_TIMESTAMP
-          AND NOT EXISTS(
-            SELECT 1
-            FROM blocked_users b
-            WHERE
-              (b.blocker_id=$1 AND b.blocked_id=s.user_id)
-              OR
-              (b.blocker_id=s.user_id AND b.blocked_id=$1)
-          )
-        ORDER BY s.created_at DESC
-        LIMIT 100
-      `,[user.id]);
-
-      let html = `
-        <div class="card">
-          <h2>📖 استوری‌ها</h2>
-
-          <form method="POST" action="/stories">
-            <input
-              name="media_url"
-              maxlength="2000"
-              placeholder="لینک عکس یا ویدئو"
-            >
-
-            <select name="media_type">
-              <option value="image">عکس</option>
-              <option value="video">ویدئو</option>
-            </select>
-
-            <textarea
-              name="text"
-              maxlength="1000"
-              placeholder="متن استوری"
-            ></textarea>
-
-            <button class="full green">
-              ➕ انتشار استوری
-            </button>
-          </form>
-        </div>
-      `;
-
-      if (!r.rows.length) {
-        html += `
-          <div class="card empty">
-            هنوز استوری فعالی وجود ندارد.
-          </div>
-        `;
-      } else {
-        for (const s of r.rows) {
-          const media =
-            s.media_type === "video"
-              ? `
-                <video
-                  class="post-image"
-                  controls
-                  src="${escapeHtml(s.media_url || "")}"
-                ></video>
-              `
-              : s.media_url
-                ? `
-                  <img
-                    class="post-image"
-                    src="${escapeHtml(s.media_url)}"
-                    alt="story"
-                  >
-                `
-                : "";
-
-          html += `
-            <article class="card">
-              <div class="profile-head">
-                <div class="avatar">
-                  ${escapeHtml((s.name || "?").charAt(0))}
-                </div>
-
-                <div>
-                  <div class="username">
-                    ${escapeHtml(s.name)}
-                  </div>
-
-                  <div class="small">
-                    ${s.viewed ? "👁️ دیده شده" : "🟢 جدید"}
-                    · 👁️ ${s.view_count}
-                  </div>
-                </div>
-              </div>
-
-              ${media}
-
-              ${
-                s.text
-                  ? `<div class="post-text">${escapeHtml(s.text)}</div>`
-                  : ""
-              }
-
-              <div class="actions">
-                ${
-                  s.viewed
-                    ? `<span class="small">این استوری را دیده‌ای</span>`
-                    : `<a href="/story-view?id=${s.id}">
-                         <button>👁️ مشاهده</button>
-                       </a>`
-                }
-
-                <a href="/story-react?id=${s.id}&reaction=❤️">
-                  <button>❤️</button>
-                </a>
-
-                <a href="/story-react?id=${s.id}&reaction=🔥">
-                  <button>🔥</button>
-                </a>
-              </div>
-            </article>
-          `;
-        }
-      }
-
-      sendHtml(res,200,"استوری‌ها",html,user);
-      return;
-    }
-
-    if (req.method === "POST" && path === "/stories") {
-      const d = await readBody(req);
-
-      const mediaUrl =
-        (d.get("media_url") || "").trim();
-
-      const mediaType =
-        (d.get("media_type") || "image").trim();
-
-      const text =
-        (d.get("text") || "").trim();
-
-      if (!mediaUrl && !text) {
-        sendHtml(
-          res,
-          400,
-          "خطا",
-          `<div class="card error">
-             استوری باید حداقل یک عکس، ویدئو یا متن داشته باشد.
-           </div>`,
-          user
-        );
-        return;
-      }
-
-      const allowedTypes = ["image","video"];
-
-      const finalMediaType =
-        allowedTypes.includes(mediaType)
-          ? mediaType
-          : "image";
-
-      await pool.query(`
-        INSERT INTO stories(
-          user_id,
-          media_url,
-          media_type,
-          text,
-          expires_at
-        )
-        VALUES(
-          $1,
-          $2,
-          $3,
-          $4,
-          CURRENT_TIMESTAMP + INTERVAL '24 hours'
-        )
-      `,[
-        user.id,
-        mediaUrl || null,
-        finalMediaType,
-        text || null
-      ]);
-
-      redirect(res,"/stories");
-      return;
-    }
-
-    if (req.method === "GET" && path === "/story-view") {
-      const storyId =
-        Number(url.searchParams.get("id"));
-
-      if (Number.isInteger(storyId)) {
-        const r = await pool.query(`
-          SELECT id,user_id
-          FROM stories
-          WHERE id=$1
-            AND expires_at>CURRENT_TIMESTAMP
-        `,[storyId]);
-
-        if (r.rows.length) {
-          await pool.query(`
-            INSERT INTO story_views(story_id,user_id)
-            VALUES($1,$2)
-            ON CONFLICT(story_id,user_id) DO NOTHING
-          `,[storyId,user.id]);
-
-          if (r.rows[0].user_id !== user.id) {
-            await notify(
-              r.rows[0].user_id,
-              user.id,
-              "story_view",
-              null,
-              `${user.name} استوری شما را مشاهده کرد.`
-            );
-          }
-        }
-      }
-
-      redirect(res,"/stories");
-      return;
-    }
-
-    if (req.method === "GET" && path === "/story-react") {
-      const storyId =
-        Number(url.searchParams.get("id"));
-
-      const reaction =
-        (url.searchParams.get("reaction") || "❤️").slice(0,20);
-
-      if (Number.isInteger(storyId)) {
-        const r = await pool.query(`
-          SELECT id,user_id
-          FROM stories
-          WHERE id=$1
-            AND expires_at>CURRENT_TIMESTAMP
-        `,[storyId]);
-
-        if (r.rows.length) {
-          await pool.query(`
-            INSERT INTO story_reactions(
-              story_id,
-              user_id,
-              reaction
-            )
-            VALUES($1,$2,$3)
-            ON CONFLICT(story_id,user_id)
-            DO UPDATE SET reaction=EXCLUDED.reaction
-          `,[
-            storyId,
-            user.id,
-            reaction
-          ]);
-
-          if (r.rows[0].user_id !== user.id) {
-            await notify(
-              r.rows[0].user_id,
-              user.id,
-              "story_reaction",
-              null,
-              `${user.name} به استوری شما ${reaction} واکنش نشان داد.`
-            );
-          }
-        }
-      }
-
-      redirect(res,"/stories");
-      return;
-    }
-
-    if (req.method === "GET" && path === "/highlights") {
-      const r = await pool.query(`
-        SELECT
-          h.id,
-          h.title,
-          h.cover_url,
-          h.created_at,
-          COUNT(hi.story_id)::int AS item_count
-        FROM highlights h
-        LEFT JOIN highlight_items hi
-          ON hi.highlight_id=h.id
-        WHERE h.user_id=$1
-        GROUP BY h.id
-        ORDER BY h.created_at DESC
-      `,[user.id]);
-
-      const html = `
-        <div class="card">
-          <h2>⭐ هایلایت‌ها</h2>
-
-          <form method="POST" action="/highlights">
-            <input
-              name="title"
-              maxlength="100"
-              placeholder="نام هایلایت"
-              required
-            >
-
-            <input
-              name="cover_url"
-              maxlength="2000"
-              placeholder="لینک تصویر کاور"
-            >
-
-            <button class="full">
-              ➕ ساخت هایلایت
-            </button>
-          </form>
-        </div>
-
-        ${
-          r.rows.map(h => `
-            <div class="card">
-              <div class="username">
-                ⭐ ${escapeHtml(h.title)}
-              </div>
-
-              <div class="small">
-                ${h.item_count} استوری
-              </div>
-
-              ${
-                h.cover_url
-                  ? `
-                    <img
-                      class="post-image"
-                      src="${escapeHtml(h.cover_url)}"
-                    >
-                  `
-                  : ""
-              }
-
-              <div class="actions">
-                <a href="/highlight?id=${h.id}">
-                  <button>مشاهده</button>
-                </a>
-
-                <a href="/highlight-delete?id=${h.id}">
-                  <button class="danger">حذف</button>
-                </a>
-              </div>
-            </div>
-          `).join("")
-          ||
-          `<div class="card empty">
-             هنوز هایلایتی ساخته نشده است.
-           </div>`
-        }
-      `;
-
-      sendHtml(res,200,"هایلایت‌ها",html,user);
-      return;
-    }
-
-    if (req.method === "POST" && path === "/highlights") {
-      const d = await readBody(req);
-
-      const title =
-        (d.get("title") || "").trim();
-
-      const coverUrl =
-        (d.get("cover_url") || "").trim();
-
-      if (!title) {
-        sendHtml(
-          res,
-          400,
-          "خطا",
-          `<div class="card error">
-             نام هایلایت الزامی است.
-           </div>`,
-          user
-        );
-        return;
-      }
-
-      await pool.query(`
-        INSERT INTO highlights(
-          user_id,
-          title,
-          cover_url
-        )
-        VALUES($1,$2,$3)
-      `,[
-        user.id,
-        title,
-        coverUrl || null
-      ]);
-
-      redirect(res,"/highlights");
-      return;
-    }
-
-    if (req.method === "GET" && path === "/highlight") {
-      const highlightId =
-        Number(url.searchParams.get("id"));
-
-      if (!Number.isInteger(highlightId)) {
-        sendHtml(
-          res,
-          400,
-          "خطا",
-          `<div class="card error">
-             شناسه هایلایت نامعتبر است.
-           </div>`,
-          user
-        );
-        return;
-      }
-
-      const r = await pool.query(`
-        SELECT
-          h.id,
-          h.title,
-          h.cover_url,
-          s.id AS story_id,
-          s.media_url,
-          s.media_type,
-          s.text,
-          s.created_at
-        FROM highlights h
-        LEFT JOIN highlight_items hi
-          ON hi.highlight_id=h.id
-        LEFT JOIN stories s
-          ON s.id=hi.story_id
-        WHERE h.id=$1
-          AND h.user_id=$2
-        ORDER BY s.created_at ASC
-      `,[highlightId,user.id]);
-
-      if (!r.rows.length) {
-        sendHtml(
-          res,
-          404,
-          "هایلایت",
-          `<div class="card empty">
-             هایلایت پیدا نشد.
-           </div>`,
-          user
-        );
-        return;
-      }
-
-      let html = `
-        <div class="card">
-          <h2>⭐ ${escapeHtml(r.rows[0].title)}</h2>
-        </div>
-      `;
-
-      for (const s of r.rows) {
-        if (!s.story_id) continue;
-
-        const media =
-          s.media_type === "video"
-            ? `<video class="post-image" controls src="${escapeHtml(s.media_url || "")}"></video>`
-            : s.media_url
-              ? `<img class="post-image" src="${escapeHtml(s.media_url)}">`
-              : "";
-
-        html += `
-          <div class="card">
-            ${media}
-            ${
-              s.text
-                ? `<div class="post-text">${escapeHtml(s.text)}</div>`
-                : ""
-            }
-          </div>
-        `;
-      }
-
-      sendHtml(res,200,"هایلایت",html,user);
-      return;
-    }
-
-    if (req.method === "GET" && path === "/highlight-delete") {
-      const highlightId =
-        Number(url.searchParams.get("id"));
-
-      if (Number.isInteger(highlightId)) {
-        await pool.query(`
-          DELETE FROM highlights
-          WHERE id=$1 AND user_id=$2
-        `,[highlightId,user.id]);
-      }
-
-      redirect(res,"/highlights");
-      return;
-    }
-
-    if (req.method === "GET" && path === "/reels") {
-      const r = await pool.query(`
-        SELECT
-          r.id,
-          r.caption,
-          r.media_url,
-          r.media_type,
-          r.created_at,
-          u.id AS user_id,
-          u.name,
-          (SELECT COUNT(*)
-             FROM reel_likes rl
-            WHERE rl.reel_id=r.id)::int AS like_count,
-          (SELECT COUNT(*)
-             FROM reel_comments rc
-            WHERE rc.reel_id=r.id)::int AS comment_count,
-          EXISTS(
-            SELECT 1
-            FROM reel_likes rl2
-            WHERE rl2.reel_id=r.id
-              AND rl2.user_id=$1
-          ) AS liked
-        FROM reels r
-        JOIN users u ON u.id=r.user_id
-        WHERE NOT EXISTS(
-          SELECT 1
-          FROM blocked_users b
-          WHERE
-            (b.blocker_id=$1 AND b.blocked_id=r.user_id)
-            OR
-            (b.blocker_id=r.user_id AND b.blocked_id=$1)
-        )
-        ORDER BY r.created_at DESC
-        LIMIT 100
-      `,[user.id]);
-
-      let html = `
-        <div class="card">
-          <h2>🎬 Reels</h2>
-
-          <form method="POST" action="/reels">
-            <input
-              name="media_url"
-              maxlength="2000"
-              placeholder="لینک ویدئو"
-              required
-            >
-
-            <input
-              name="caption"
-              maxlength="3000"
-              placeholder="توضیحات Reel"
-            >
-
-            <button class="full green">
-              ➕ انتشار Reel
-            </button>
-          </form>
-        </div>
-      `;
-
-      for (const r of r.rows) {
-        const media =
-          r.media_type === "video"
-            ? `
-              <video
-                class="post-image"
-                controls
-                src="${escapeHtml(r.media_url)}"
-              ></video>
-            `
-            : `
-              <img
-                class="post-image"
-                src="${escapeHtml(r.media_url)}"
-              >
-            `;
-
-        html += `
-          <article class="card">
-            <div class="profile-head">
-              <div class="avatar">
-                ${escapeHtml(r.name.charAt(0))}
-              </div>
-
-              <div>
-                <div class="username">
-                  ${escapeHtml(r.name)}
-                </div>
-              </div>
-            </div>
-
-            ${media}
-
-            ${
-              r.caption
-                ? `<div class="post-text">${escapeHtml(r.caption)}</div>`
-                : ""
-            }
-
-            <div class="stats">
-              ❤️ ${r.like_count}
-              · 💬 ${r.comment_count}
-            </div>
-
-            <div class="actions">
-              <a href="/reel-like?id=${r.id}">
-                <button class="like">
-                  ${r.liked ? "💔 برداشتن لایک" : "❤️ لایک"}
-                </button>
-              </a>
-
-              <a href="/reel?id=${r.id}">
-                <button>💬 نظرها</button>
-              </a>
-
-              <a href="/reel-share?id=${r.id}">
-                <button>🔗 اشتراک</button>
-              </a>
-            </div>
-          </article>
-        `;
-      }
-
-      if (!r.rows.length) {
-        html += `
-          <div class="card empty">
-            هنوز Reel منتشر نشده است.
-          </div>
-        `;
-      }
-
-      sendHtml(res,200,"Reels",html,user);
-      return;
-    }
-
-    if (req.method === "POST" && path === "/reels") {
-      const d = await readBody(req);
-
-      const mediaUrl =
-        (d.get("media_url") || "").trim();
-
-      const caption =
-        (d.get("caption") || "").trim();
-
-      if (!mediaUrl) {
-        sendHtml(
-          res,
-          400,
-          "خطا",
-          `<div class="card error">
-             لینک ویدئو الزامی است.
-           </div>`,
-          user
-        );
-        return;
-      }
-
-      await pool.query(`
-        INSERT INTO reels(
-          user_id,
-          media_url,
-          media_type,
-          caption
-        )
-        VALUES($1,$2,'video',$3)
-      `,[
-        user.id,
-        mediaUrl,
-        caption || null
-      ]);
-
-      redirect(res,"/reels");
-      return;
-    }
-
-    if (req.method === "GET" && path === "/reel") {
-      const reelId =
-        Number(url.searchParams.get("id"));
-
-      const r = await pool.query(`
-        SELECT
-          r.*,
-          u.name,
-          u.email
-        FROM reels r
-        JOIN users u ON u.id=r.user_id
-        WHERE r.id=$1
-      `,[reelId]);
-
-      if (!r.rows.length) {
-        sendHtml(
-          res,
-          404,
-          "Reel",
-          `<div class="card empty">
-             Reel پیدا نشد.
-           </div>`,
-          user
-        );
-        return;
-      }
-
-      const reel = r.rows[0];
-
-      await pool.query(`
-        INSERT INTO reel_views(reel_id,user_id)
-        SELECT $1,$2
-        WHERE NOT EXISTS(
-          SELECT 1
-          FROM reel_views
-          WHERE reel_id=$1
-            AND user_id=$2
-        )
-      `,[reelId,user.id]);
-
-      const comments = await pool.query(`
-        SELECT
-          c.comment,
-          c.created_at,
-          u.name
-        FROM reel_comments c
-        JOIN users u ON u.id=c.user_id
-        WHERE c.reel_id=$1
-        ORDER BY c.created_at ASC
-      `,[reelId]);
-
-      const media =
-        reel.media_type === "video"
-          ? `
-            <video
-              class="post-image"
-              controls
-              src="${escapeHtml(reel.media_url)}"
-            ></video>
-          `
-          : `
-            <img
-              class="post-image"
-              src="${escapeHtml(reel.media_url)}"
-            >
-          `;
-
-      const commentsHtml =
-        comments.rows.map(c => `
-          <div class="comment">
-            <div class="comment-name">
-              ${escapeHtml(c.name)}
-            </div>
-            <div class="comment-text">
-              ${escapeHtml(c.comment)}
-            </div>
-          </div>
-        `).join("")
-        ||
-        `<div class="empty">
-           هنوز نظری ثبت نشده است.
-         </div>`;
-
-      sendHtml(
-        res,
-        200,
-        "Reel",
-        `
-          <article class="card">
-            <div class="profile-head">
-              <div class="avatar">
-                ${escapeHtml(reel.name.charAt(0))}
-              </div>
-
-              <div>
-                <div class="username">
-                  ${escapeHtml(reel.name)}
-                </div>
-
-                <div class="small">
-                  ${escapeHtml(reel.email)}
-                </div>
-              </div>
-            </div>
-
-            ${media}
-
-            ${
-              reel.caption
-                ? `<div class="post-text">${escapeHtml(reel.caption)}</div>`
-                : ""
-            }
-
-            <div class="actions">
-              <a href="/reel-like?id=${reel.id}">
-                <button>❤️ لایک</button>
-              </a>
-
-              <a href="/reel-share?id=${reel.id}">
-                <button>🔗 اشتراک</button>
-              </a>
-            </div>
-          </article>
-
-          <div class="card">
-            <h3>💬 نظرات</h3>
-
-            ${commentsHtml}
-
-            <div class="divider"></div>
-
-            <form method="POST" action="/reel-comment">
-              <input
-                type="hidden"
-                name="reel_id"
-                value="${reel.id}"
-              >
-
-              <textarea
-                name="comment"
-                maxlength="2000"
-                placeholder="نظر خود را بنویس..."
-                required
-              ></textarea>
-
-              <button class="full">
-                ارسال نظر
-              </button>
-            </form>
-          </div>
-        `,
-        user
-      );
-
-      return;
-    }
-
-    if (req.method === "GET" && path === "/reel-like") {
-      const reelId =
-        Number(url.searchParams.get("id"));
-
-      if (Number.isInteger(reelId)) {
-        const r = await pool.query(`
-          SELECT
-        if (req.method === "GET" && path === "/profile") {
-      const profileId = Number(
-        url.searchParams.get("id") || user.id
-      );
-
-      if (!Number.isInteger(profileId)) {
-        sendHtml(
-          res,
-          400,
-          "خطا",
-          `<div class="card error">شناسه کاربر نامعتبر است.</div>`,
-          user
-        );
-        return;
-      }
-
-      const r = await pool.query(`
-        SELECT
-          u.id,
-          u.name,
-          u.email,
-          u.created_at,
-          COALESCE(s.is_private,FALSE) AS is_private,
-
-          (SELECT COUNT(*)
-             FROM posts p
-            WHERE p.user_id=u.id
-              AND COALESCE(p.archived,FALSE)=FALSE)::int AS post_count,
-
-          (SELECT COUNT(*)
-             FROM follows f
-            WHERE f.following_id=u.id)::int AS follower_count,
-
-          (SELECT COUNT(*)
-             FROM follows f
-            WHERE f.follower_id=u.id)::int AS following_count,
-
-          EXISTS(
-            SELECT 1
-            FROM follows f
-            WHERE f.follower_id=$2
-              AND f.following_id=u.id
-          ) AS following,
-
-          EXISTS(
-            SELECT 1
-            FROM follow_requests fr
-            WHERE fr.sender_id=$2
-              AND fr.receiver_id=u.id
-              AND fr.status='pending'
-          ) AS request_pending,
-
-          EXISTS(
-            SELECT 1
-            FROM blocked_users b
-            WHERE
-              (b.blocker_id=$2 AND b.blocked_id=u.id)
-              OR
-              (b.blocker_id=u.id AND b.blocked_id=$2)
-          ) AS blocked
-
-        FROM users u
-        LEFT JOIN user_settings s
-          ON s.user_id=u.id
-        WHERE u.id=$1
-      `,[profileId,user.id]);
-
-      if (!r.rows.length) {
-        sendHtml(
-          res,
-          404,
-          "پروفایل",
-          `<div class="card empty">کاربر پیدا نشد.</div>`,
-          user
-        );
-        return;
-      }
-
-      const p = r.rows[0];
-
-      if (
-        profileId !== user.id &&
-        !p.blocked
-      ) {
-        await pool.query(`
-          INSERT INTO profile_visits(
-            visitor_id,
-            profile_id
-          )
-          VALUES($1,$2)
-        `,[user.id,profileId]);
-      }
-
-      const canSeePosts =
-        profileId === user.id ||
-        !p.is_private ||
-        p.following;
-
-      let postsHtml = "";
-
-      if (canSeePosts && !p.blocked) {
-        const posts = await pool.query(`
-          SELECT
-            p.*,
-            (SELECT COUNT(*)
-               FROM likes l
-              WHERE l.post_id=p.id)::int AS like_count,
-
-            (SELECT COUNT(*)
-               FROM comments c
-              WHERE c.post_id=p.id)::int AS comment_count,
-
-            EXISTS(
-              SELECT 1
-              FROM likes l2
-              WHERE l2.post_id=p.id
-                AND l2.user_id=$2
-            ) AS liked,
-
-            EXISTS(
-              SELECT 1
-              FROM bookmarks b2
-              WHERE b2.post_id=p.id
-                AND b2.user_id=$2
-            ) AS bookmarked
-
-          FROM posts p
-          WHERE p.user_id=$1
-            AND COALESCE(p.archived,FALSE)=FALSE
-          ORDER BY p.created_at DESC
-          LIMIT 100
-        `,[profileId,user.id]);
-
-        postsHtml =
-          posts.rows.map(renderPost).join("")
-          ||
-          `<div class="card empty">
-             هنوز پستی منتشر نشده است.
-           </div>`;
-      } else if (p.blocked) {
-        postsHtml = `
-          <div class="card empty">
-            این پروفایل در دسترس نیست.
-          </div>
-        `;
-      } else {
-        postsHtml = `
-          <div class="card empty">
-            🔒 این حساب خصوصی است.
-            برای دیدن پست‌ها ابتدا باید او را دنبال کنید.
-          </div>
-        `;
-      }
-
-      let action = "";
-
-      if (profileId === user.id) {
-        action = `
-          <a href="/profile-edit">
-            <button>✏️ ویرایش پروفایل</button>
-          </a>
-          <a href="/settings">
-            <button>⚙️ تنظیمات</button>
-          </a>
-        `;
-      } else if (p.blocked) {
-        action = `
-          <a href="/block?id=${p.id}">
-            <button>🔓 رفع بلاک</button>
-          </a>
-        `;
-      } else if (p.following) {
-        action = `
-          <a href="/follow?id=${p.id}">
-            <button>❌ لغو دنبال‌کردن</button>
-          </a>
-        `;
-      } else if (p.request_pending) {
-        action = `
-          <button disabled>
-            ⏳ درخواست ارسال شده
-          </button>
-        `;
-      } else {
-        action = `
-          <a href="/follow?id=${p.id}">
-            <button class="green">
-              ${
-                p.is_private
-                  ? "🔒 درخواست دنبال‌کردن"
-                  : "➕ دنبال‌کردن"
-              }
-            </button>
-          </a>
-        `;
-      }
-
-      const profileHtml = `
-        <div class="card">
-          <div class="profile-head">
-            <div class="avatar big">
-              ${escapeHtml((p.name || "?").charAt(0))}
-            </div>
-
-            <div>
-              <h2>${escapeHtml(p.name)}</h2>
-
-              <div class="small">
-                ${p.is_private ? "🔒 حساب خصوصی" : "🌐 حساب عمومی"}
-              </div>
-            </div>
-          </div>
-
-          <div class="stats-grid">
-            <div>
-              <strong>${p.post_count}</strong>
-              <span>پست</span>
-            </div>
-
-            <div>
-              <strong>${p.follower_count}</strong>
-              <span>دنبال‌کننده</span>
-            </div>
-
-            <div>
-              <strong>${p.following_count}</strong>
-              <span>دنبال‌شونده</span>
-            </div>
-          </div>
-
-          <div class="actions">
-            ${action}
-
-            ${
-              profileId !== user.id && !p.blocked
-                ? `
-                  <a href="/messages?user=${p.id}">
-                    <button>💬 پیام</button>
-                  </a>
-
-                  <a href="/block?id=${p.id}">
-                    <button class="danger">🚫 بلاک</button>
-                  </a>
-                `
-                : ""
-            }
-          </div>
-        </div>
-
-        <h3 class="section-title">📸 پست‌ها</h3>
-
-        ${postsHtml}
-      `;
-
-      sendHtml(
-        res,
-        200,
-        `پروفایل ${p.name}`,
-        profileHtml,
-        user
-      );
-
-      return;
-    }
-
-    if (req.method === "GET" && path === "/profile-edit") {
-      const r = await pool.query(`
-        SELECT
-          u.name,
-          u.email
-        FROM users u
-        WHERE u.id=$1
-      `,[user.id]);
-
-      const current = r.rows[0] || user;
-
-      sendHtml(
-        res,
-        200,
-        "ویرایش پروفایل",
-        `
-          <div class="card">
-            <h2>✏️ ویرایش پروفایل</h2>
-
-            <form method="POST" action="/profile-edit">
-              <label>نام</label>
-
-              <input
-                name="name"
-                value="${escapeHtml(current.name || "")}"
-                maxlength="100"
-                required
-              >
-
-              <label>ایمیل</label>
-
-              <input
-                type="email"
-                name="email"
-                value="${escapeHtml(current.email || "")}"
-                maxlength="200"
-              >
-
-              <button class="full green">
-                💾 ذخیره تغییرات
-              </button>
-            </form>
-
-            <div class="divider"></div>
-
-            <a href="/password">
-              <button class="full">
-                🔐 تغییر رمز عبور
-              </button>
-            </a>
-          </div>
-        `,
-        user
-      );
-
-      return;
-    }
-
-    if (req.method === "POST" && path === "/profile-edit") {
-      const d = await readBody(req);
-
-      const name =
-        (d.get("name") || "").trim();
-
-      const email =
-        (d.get("email") || "").trim();
-
-      if (!name) {
-        sendHtml(
-          res,
-          400,
-          "خطا",
-          `<div class="card error">
-             نام نمی‌تواند خالی باشد.
-           </div>`,
-          user
-        );
-        return;
-      }
-
-      const emailOwner = await pool.query(`
-        SELECT id
-        FROM users
-        WHERE LOWER(email)=LOWER($1)
-          AND id<>$2
-        LIMIT 1
-      `,[email,user.id]);
-
-      if (email && emailOwner.rows.length) {
-        sendHtml(
-          res,
-          400,
-          "خطا",
-          `<div class="card error">
-             این ایمیل قبلاً استفاده شده است.
-           </div>`,
-          user
-        );
-        return;
-      }
-
-      await pool.query(`
-        UPDATE users
-        SET
-          name=$1,
-          email=$2
-        WHERE id=$3
-      `,[
-        name,
-        email || null,
-        user.id
-      ]);
-
-      redirect(res,`/profile?id=${user.id}`);
-      return;
-    }
-
-    if (req.method === "GET" && path === "/follow") {
-      const targetId =
-        Number(url.searchParams.get("id"));
-
-      if (
-        !Number.isInteger(targetId) ||
-        targetId === user.id
-      ) {
-        redirect(res,"/");
-        return;
-      }
-
-      const target = await pool.query(`
-        SELECT
-          u.id,
-          u.name,
-          COALESCE(s.is_private,FALSE) AS is_private
-        FROM users u
-        LEFT JOIN user_settings s
-          ON s.user_id=u.id
-        WHERE u.id=$1
-      `,[targetId]);
-
-      if (!target.rows.length) {
-        redirect(res,"/");
-        return;
-      }
-
-      const blocked = await pool.query(`
-        SELECT 1
-        FROM blocked_users
-        WHERE
-          (blocker_id=$1 AND blocked_id=$2)
-          OR
-          (blocker_id=$2 AND blocked_id=$1)
-        LIMIT 1
-      `,[user.id,targetId]);
-
-      if (blocked.rows.length) {
-        redirect(res,`/profile?id=${targetId}`);
-        return;
-      }
-
-      const existing = await pool.query(`
-        SELECT 1
-        FROM follows
-        WHERE follower_id=$1
-          AND following_id=$2
-        LIMIT 1
-      `,[user.id,targetId]);
-
-      if (existing.rows.length) {
-        await pool.query(`
-          DELETE FROM follows
-          WHERE follower_id=$1
-            AND following_id=$2
-        `,[user.id,targetId]);
-
-        await pool.query(`
-          DELETE FROM follow_requests
-          WHERE sender_id=$1
-            AND receiver_id=$2
-        `,[user.id,targetId]);
-
-        redirect(res,`/profile?id=${targetId}`);
-        return;
-      }
-
-      if (target.rows[0].is_private) {
-        await pool.query(`
-          INSERT INTO follow_requests(
-            sender_id,
-            receiver_id,
-            status
-          )
-          VALUES($1,$2,'pending')
-          ON CONFLICT(sender_id,receiver_id)
-          DO UPDATE SET status='pending'
-        `,[user.id,targetId]);
-
-        await notify(
-          targetId,
-          user.id,
-          "follow_request",
-          null,
-          `${user.name} درخواست دنبال‌کردن شما را ارسال کرد.`
-        );
-      } else {
-        await pool.query(`
-          INSERT INTO follows(
-            follower_id,
-            following_id
-          )
-          VALUES($1,$2)
-          ON CONFLICT DO NOTHING
-        `,[user.id,targetId]);
-
-        await notify(
-          targetId,
-          user.id,
-          "follow",
-          null,
-          `${user.name} شما را دنبال کرد.`
-        );
-      }
-
-      redirect(res,`/profile?id=${targetId}`);
-      return;
-    }
-
-    if (req.method === "GET" && path === "/follow-requests") {
-      const r = await pool.query(`
-        SELECT
-          fr.id,
-          fr.sender_id,
-          fr.created_at,
-          u.name
-        FROM follow_requests fr
-        JOIN users u
-          ON u.id=fr.sender_id
-        WHERE fr.receiver_id=$1
-          AND fr.status='pending'
-        ORDER BY fr.created_at DESC
-      `,[user.id]);
-
-      const html = `
-        <div class="card">
-          <h2>👥 درخواست‌های دنبال‌کردن</h2>
-        </div>
-
-        ${
-          r.rows.map(x => `
-            <div class="card">
-              <div class="profile-head">
-                <div class="avatar">
-                  ${escapeHtml((x.name || "?").charAt(0))}
-                </div>
-
-                <div>
-                  <div class="username">
-                    ${escapeHtml(x.name)}
-                  </div>
-
-                  <div class="small">
-                    درخواست دنبال‌کردن
-                  </div>
-                </div>
-              </div>
-
-              <div class="actions">
-                <a href="/follow-accept?id=${x.id}">
-                  <button class="green">
-                    ✅ قبول
-                  </button>
-                </a>
-
-                <a href="/follow-reject?id=${x.id}">
-                  <button class="danger">
-                    ❌ رد
-                  </button>
-                </a>
-
-                <a href="/profile?id=${x.sender_id}">
-                  <button>
-                    👤 پروفایل
-                  </button>
-                </a>
-              </div>
-            </div>
-          `).join("")
-          ||
-          `<div class="card empty">
-             درخواست جدیدی وجود ندارد.
-           </div>`
-        }
-      `;
-
-      sendHtml(
-        res,
-        200,
-        "درخواست‌ها",
-        html,
-        user
-      );
-
-      return;
-    }
-
-    if (req.method === "GET" && path === "/follow-accept") {
-      const requestId =
-        Number(url.searchParams.get("id"));
-
-      if (Number.isInteger(requestId)) {
-        const r = await pool.query(`
-          SELECT sender_id
-          FROM follow_requests
-          WHERE id=$1
-            AND receiver_id=$2
-            AND status='pending'
-        `,[requestId,user.id]);
-
-        if (r.rows.length) {
-          const senderId = r.rows[0].sender_id;
-
-          await pool.query(`
-            UPDATE follow_requests
-            SET
-              status='accepted',
-              responded_at=CURRENT_TIMESTAMP
-            WHERE id=$1
-          `,[requestId]);
-
-          await pool.query(`
-            INSERT INTO follows(
-              follower_id,
-              following_id
-            )
-            VALUES($1,$2)
-            ON CONFLICT DO NOTHING
-          `,[senderId,user.id]);
-
-          await notify(
-            senderId,
-            user.id,
-            "follow_accept",
-            null,
-            `${user.name} درخواست دنبال‌کردن شما را پذیرفت.`
-          );
-        }
-      }
-
-      redirect(res,"/follow-requests");
-      return;
-    }
-
-    if (req.method === "GET" && path === "/follow-reject") {
-      const requestId =
-        Number(url.searchParams.get("id"));
-
-      if (Number.isInteger(requestId)) {
-        const r = await pool.query(`
-          SELECT sender_id
-          FROM follow_requests
-          WHERE id=$1
-            AND receiver_id=$2
-            AND status='pending'
-        `,[requestId,user.id]);
-
-        if (r.rows.length) {
-          await pool.query(`
-            UPDATE follow_requests
-            SET
-              status='rejected',
-              responded_at=CURRENT_TIMESTAMP
-            WHERE id=$1
-          `,[requestId]);
-
-          await notify(
-            r.rows[0].sender_id,
-            user.id,
-            "follow_reject",
-            null,
-            `${user.name} درخواست دنبال‌کردن شما را رد کرد.`
-          );
-        }
-      }
-
-      redirect(res,"/follow-requests");
-      return;
-    }
-
-    if (req.method === "GET" && path === "/messages") {
-      const otherId =
-        Number(url.searchParams.get("user") || 0);
-
-      let people = [];
-
-      if (Number.isInteger(otherId) && otherId > 0) {
-        const exists = await pool.query(`
-          SELECT id,name
-          FROM users
-          WHERE id=$1
-        `,[otherId]);
-
-        if (exists.rows.length) {
-          people = exists.rows;
-        }
-      }
-
-      const conversations = await pool.query(`
-        SELECT DISTINCT
-          u.id,
-          u.name
-        FROM users u
-        JOIN messages m
-          ON (
-            (m.sender_id=$1 AND m.receiver_id=u.id)
-            OR
-            (m.receiver_id=$1 AND m.sender_id=u.id)
-          )
-        WHERE u.id<>$1
-        ORDER BY u.name
-      `,[user.id]);
-
-      for (const p of conversations.rows) {
-        if (!people.some(x => x.id === p.id)) {
-          people.push(p);
-        }
-      }
-
-      let messagesHtml = "";
-
-      if (Number.isInteger(otherId) && otherId > 0) {
-        const selected = await pool.query(`
-          SELECT
-            m.id,
-            m.sender_id,
-            m.receiver_id,
-            m.content,
-            m.created_at,
-            u.name AS sender_name
-          FROM messages m
-          JOIN users u
-            ON u.id=m.sender_id
-          WHERE
-            (m.sender_id=$1 AND m.receiver_id=$2)
-            OR
-            (m.sender_id=$2 AND m.receiver_id=$1)
-          ORDER BY m.created_at ASC
-          LIMIT 500
-        `,[user.id,otherId]);
-
-        messagesHtml =
-          selected.rows.map(m => `
-            <div class="message ${
-              m.sender_id === user.id
-                ? "mine"
-                : "theirs"
-            }">
-              <div class="small">
-                ${escapeHtml(m.sender_name)}
-              </div>
-
-              <div>
-                ${escapeHtml(m.content)}
-              </div>
-
-              <div class="small">
-                ${new Date(m.created_at).toLocaleString("fa-IR")}
-              </div>
-            </div>
-          `).join("")
-          ||
-          `<div class="empty">
-             هنوز پیامی وجود ندارد.
-           </div>`;
-      }
-
-      sendHtml(
-        res,
-        200,
-        "پیام‌ها",
-        `
-          <div class="card">
-            <h2>💬 پیام‌ها</h2>
-
-            <div class="conversation-list">
-              ${
-                people.map(p => `
-                  <a
-                    class="conversation"
-                    href="/messages?user=${p.id}"
-                  >
-                    👤 ${escapeHtml(p.name)}
-                  </a>
-                `).join("")
-                ||
-                `<div class="small">
-                   هنوز گفت‌وگویی ندارید.
-                 </div>`
-              }
-            </div>
-          </div>
-
-          ${
-            Number.isInteger(otherId) && otherId > 0
-              ? `
-                <div class="card">
-                  <div class="messages">
-                    ${messagesHtml}
-                  </div>
-
-                  <form method="POST" action="/send-message">
-                    <input
-                      type="hidden"
-                      name="receiver_id"
-                      value="${otherId}"
-                    >
-
-                    <textarea
-                      name="content"
-                      maxlength="5000"
-                      placeholder="پیام خود را بنویس..."
-                      required
-                    ></textarea>
-
-                    <button class="full green">
-                      📤 ارسال پیام
-                    </button>
-                  </form>
-                </div>
-              `
-              : `
-                <div class="card empty">
-                  یک گفت‌وگو را انتخاب کنید.
-                </div>
-              `
-          }
-        `,
-        user
-      );
-
-      return;
-    }
-
-    if (req.method === "POST" && path === "/send-message") {
-      const d = await readBody(req);
-
-      const receiverId =
-        Number(d.get("receiver_id"));
-
-      const content =
-        (d.get("content") || "").trim();
-
-      if (
-        !Number.isInteger(receiverId) ||
-        receiverId <= 0 ||
-        !content
-      ) {
-        redirect(res,"/messages");
-        return;
-      }
-
-      if (receiverId === user.id) {
-        redirect(res,"/messages");
-        return;
-      }
-
-      const blocked = await pool.query(`
-        SELECT 1
-        FROM blocked_users
-        WHERE
-          (blocker_id=$1 AND blocked_id=$2)
-          OR
-          (blocker_id=$2 AND blocked_id=$1)
-        LIMIT 1
-      `,[user.id,receiverId]);
-
-      if (!blocked.rows.length) {
-        const receiver = await pool.query(`
-          SELECT id
-          FROM users
-          WHERE id=$1
-        `,[re     // ============================================================
-    // SECTION 5
-    // PRIVACY / MODERATION / CLOSE FRIENDS / COLLECTIONS
-    // ARCHIVE / PIN
-    // ============================================================
-
-    if (req.method === "GET" && path === "/privacy") {
-      const r = await pool.query(`
-        SELECT
-          COALESCE(is_private,FALSE) AS is_private,
-          COALESCE(message_policy,'everyone') AS message_policy,
-          COALESCE(mention_policy,'everyone') AS mention_policy,
-          COALESCE(tag_policy,'everyone') AS tag_policy,
-          COALESCE(show_activity,TRUE) AS show_activity,
-          COALESCE(allow_story_replies,TRUE) AS allow_story_replies,
-          COALESCE(notifications_enabled,TRUE) AS notifications_enabled
-        FROM user_settings
-        WHERE user_id=$1
-      `,[user.id]);
-
-      const s = r.rows[0] || {
-        is_private:false,
-        message_policy:"everyone",
-        mention_policy:"everyone",
-        tag_policy:"everyone",
-        show_activity:true,
-        allow_story_replies:true,
-        notifications_enabled:true
-      };
-
-      sendPage(
-        res,
-        "حریم خصوصی",
-        `
-        <div class="card">
-          <h2>🔐 حریم خصوصی و امنیت</h2>
-
-          <form method="POST" action="/privacy">
-
-            <label>
-              <input
-                type="checkbox"
-                name="is_private"
-                ${s.is_private ? "checked" : ""}
-              >
-              حساب خصوصی
-            </label>
-
-            <label>پیام‌ها</label>
-            <select name="message_policy">
-              <option value="everyone"
-                ${s.message_policy==="everyone"?"selected":""}>
-                همه
-              </option>
-              <option value="followers"
-                ${s.message_policy==="followers"?"selected":""}>
-                دنبال‌کنندگان
-              </option>
-              <option value="nobody"
-                ${s.message_policy==="nobody"?"selected":""}>
-                هیچ‌کس
-              </option>
-            </select>
-
-            <label>منشن کردن</label>
-            <select name="mention_policy">
-              <option value="everyone"
-                ${s.mention_policy==="everyone"?"selected":""}>
-                همه
-              </option>
-              <option value="followers"
-                ${s.mention_policy==="followers"?"selected":""}>
-                دنبال‌کنندگان
-              </option>
-              <option value="nobody"
-                ${s.mention_policy==="nobody"?"selected":""}>
-                هیچ‌کس
-              </option>
-            </select>
-
-            <label>تگ کردن</label>
-            <select name="tag_policy">
-              <option value="everyone"
-                ${s.tag_policy==="everyone"?"selected":""}>
-                همه
-              </option>
-              <option value="followers"
-                ${s.tag_policy==="followers"?"selected":""}>
-                دنبال‌کنندگان
-              </option>
-              <option value="nobody"
-                ${s.tag_policy==="nobody"?"selected":""}>
-                هیچ‌کس
-              </option>
-            </select>
-
-            <label>
-              <input
-                type="checkbox"
-                name="show_activity"
-                ${s.show_activity ? "checked" : ""}
-              >
-              نمایش وضعیت فعالیت
-            </label>
-
-            <label>
-              <input
-                type="checkbox"
-                name="allow_story_replies"
-                ${s.allow_story_replies ? "checked" : ""}
-              >
-              اجازه پاسخ به استوری
-            </label>
-
-            <label>
-              <input
-                type="checkbox"
-                name="notifications_enabled"
-                ${s.notifications_enabled ? "checked" : ""}
-              >
-              فعال بودن اعلان‌ها
-            </label>
-
-            <button type="submit">ذخیره تنظیمات</button>
-          </form>
-        </div>
-        `
-      );
-      return;
-    }
-
-    if (req.method === "POST" && path === "/privacy") {
-      const d = await readBody(req);
-
-      const isPrivate =
-        d.get("is_private") === "on";
-
-      const showActivity =
-        d.get("show_activity") === "on";
-
-      const allowStoryReplies =
-        d.get("allow_story_replies") === "on";
-
-      const notificationsEnabled =
-        d.get("notifications_enabled") === "on";
-
-      const validPolicies = [
-        "everyone",
-        "followers",
-        "nobody"
-      ];
-
-      let messagePolicy =
-        d.get("message_policy") || "everyone";
-
-      let mentionPolicy =
-        d.get("mention_policy") || "everyone";
-
-      let tagPolicy =
-        d.get("tag_policy") || "everyone";
-
-      if (!validPolicies.includes(messagePolicy)) {
-        messagePolicy = "everyone";
-      }
-
-      if (!validPolicies.includes(mentionPolicy)) {
-        mentionPolicy = "everyone";
-      }
-
-      if (!validPolicies.includes(tagPolicy)) {
-        tagPolicy = "everyone";
-      }
-
-      await pool.query(`
-        INSERT INTO user_settings(
-          user_id,
-          is_private,
-          message_policy,
-          mention_policy,
-          tag_policy,
-          show_activity,
-          allow_story_replies,
-          notifications_enabled
-        )
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-        ON CONFLICT(user_id)
-        DO UPDATE SET
-          is_private=EXCLUDED.is_private,
-          message_policy=EXCLUDED.message_policy,
-          mention_policy=EXCLUDED.mention_policy,
-          tag_policy=EXCLUDED.tag_policy,
-          show_activity=EXCLUDED.show_activity,
-          allow_story_replies=EXCLUDED.allow_story_replies,
-          notifications_enabled=EXCLUDED.notifications_enabled
-      `,[
-        user.id,
-        isPrivate,
-        messagePolicy,
-        mentionPolicy,
-        tagPolicy,
-        showActivity,
-        allowStoryReplies,
-        notificationsEnabled
-      ]);
-
-      redirect(res,"/privacy");
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // RESTRICT
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/restrict") {
-      const targetId =
-        Number(url.searchParams.get("user"));
-
-      if (
-        !Number.isInteger(targetId) ||
-        targetId <= 0 ||
-        targetId === user.id
-      ) {
-        redirect(res,"/profile");
-        return;
-      }
-
-      const existing = await pool.query(`
-        SELECT 1
-        FROM restrictions
-        WHERE
-          user_id=$1
-          AND restricted_user_id=$2
-      `,[user.id,targetId]);
-
-      if (existing.rows.length) {
-        await pool.query(`
-          DELETE FROM restrictions
-          WHERE user_id=$1
-          AND restricted_user_id=$2
-        `,[user.id,targetId]);
-      } else {
-        await pool.query(`
-          INSERT INTO restrictions(
-            user_id,
-            restricted_user_id
-          )
-          VALUES($1,$2)
-          ON CONFLICT DO NOTHING
-        `,[user.id,targetId]);
-      }
-
-      redirect(res,`/profile?id=${targetId}`);
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // MUTE
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/mute") {
-      const targetId =
-        Number(url.searchParams.get("user"));
-
-      if (
-        !Number.isInteger(targetId) ||
-        targetId <= 0 ||
-        targetId === user.id
-      ) {
-        redirect(res,"/profile");
-        return;
-      }
-
-      const existing = await pool.query(`
-        SELECT 1
-        FROM mutes
-        WHERE
-          user_id=$1
-          AND muted_user_id=$2
-      `,[user.id,targetId]);
-
-      if (existing.rows.length) {
-        await pool.query(`
-          DELETE FROM mutes
-          WHERE user_id=$1
-          AND muted_user_id=$2
-        `,[user.id,targetId]);
-      } else {
-        await pool.query(`
-          INSERT INTO mutes(
-            user_id,
-            muted_user_id
-          )
-          VALUES($1,$2)
-          ON CONFLICT DO NOTHING
-        `,[user.id,targetId]);
-      }
-
-      redirect(res,`/profile?id=${targetId}`);
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // CLOSE FRIENDS
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/close-friends") {
-      const friends = await pool.query(`
-        SELECT
-          u.id,
-          u.name,
-          u.username,
-          CASE
-            WHEN cf.friend_id IS NULL THEN FALSE
-            ELSE TRUE
-          END AS is_close
-        FROM users u
-        JOIN follows f
-          ON f.following_id=u.id
-         AND f.follower_id=$1
-        LEFT JOIN close_friends cf
-          ON cf.user_id=$1
-         AND cf.friend_id=u.id
-        WHERE u.id<>$1
-        ORDER BY u.name ASC
-      `,[user.id]);
-
-      const list =
-        friends.rows.map(f => `
-          <div class="card">
-            <strong>${escapeHtml(
-              f.name || f.username || "کاربر"
-            )}</strong>
-
-            <span>
-              ${f.is_close ? "⭐ دوست نزدیک" : "دنبال‌کننده"}
-            </span>
-
-            <a class="btn"
-              href="/close-friend?user=${f.id}">
-              ${f.is_close ? "حذف" : "افزودن"}
-            </a>
-          </div>
-        `).join("");
-
-      sendPage(
-        res,
-        "دوستان نزدیک",
-        `
-        <div class="card">
-          <h2>⭐ دوستان نزدیک</h2>
-          <p>
-            فهرست افرادی که برای محتوای مخصوص دوستان نزدیک انتخاب کرده‌ای.
-          </p>
-        </div>
-
-        ${list || `
-          <div class="card">
-            هنوز کسی برای دوستان نزدیک انتخاب نشده است.
-          </div>
-        `}
-        `
-      );
-      return;
-    }
-
-    if (req.method === "GET" && path === "/close-friend") {
-      const friendId =
-        Number(url.searchParams.get("user"));
-
-      if (
-        !Number.isInteger(friendId) ||
-        friendId <= 0 ||
-        friendId === user.id
-      ) {
-        redirect(res,"/close-friends");
-        return;
-      }
-
-      const following = await pool.query(`
-        SELECT 1
-        FROM follows
-        WHERE follower_id=$1
-        AND following_id=$2
-      `,[user.id,friendId]);
-
-      if (!following.rows.length) {
-        redirect(res,"/close-friends");
-        return;
-      }
-
-      const existing = await pool.query(`
-        SELECT 1
-        FROM close_friends
-        WHERE user_id=$1
-        AND friend_id=$2
-      `,[user.id,friendId]);
-
-      if (existing.rows.length) {
-        await pool.query(`
-          DELETE FROM close_friends
-          WHERE user_id=$1
-          AND friend_id=$2
-        `,[user.id,friendId]);
-      } else {
-        await pool.query(`
-          INSERT INTO close_friends(
-            user_id,
-            friend_id
-          )
-          VALUES($1,$2)
-          ON CONFLICT DO NOTHING
-        `,[user.id,friendId]);
-      }
-
-      redirect(res,"/close-friends");
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // BLOCKED USERS
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/blocked") {
-      const blocked = await pool.query(`
-        SELECT
-          u.id,
-          u.name,
-          u.username
-        FROM blocked_users b
-        JOIN users u
-          ON u.id=b.blocked_id
-        WHERE b.blocker_id=$1
-        ORDER BY u.name ASC
-      `,[user.id]);
-
-      const list =
-        blocked.rows.map(b => `
-          <div class="card">
-            <strong>${escapeHtml(
-              b.name || b.username || "کاربر"
-            )}</strong>
-
-            <span>
-              @${escapeHtml(b.username || "")}
-            </span>
-
-            <a class="btn"
-              href="/block?user=${b.id}">
-              رفع مسدودی
-            </a>
-          </div>
-        `).join("");
-
-      sendPage(
-        res,
-        "کاربران مسدودشده",
-        `
-        <div class="card">
-          <h2>🚫 کاربران مسدودشده</h2>
-        </div>
-
-        ${list || `
-          <div class="card">
-            کاربری مسدود نشده است.
-          </div>
-        `}
-        `
-      );
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // COLLECTIONS
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/collections") {
-      const collections = await pool.query(`
-        SELECT
-          c.id,
-          c.name,
-          c.created_at,
-          COUNT(ci.post_id)::int AS item_count
-        FROM collections c
-        LEFT JOIN collection_items ci
-          ON ci.collection_id=c.id
-        WHERE c.user_id=$1
-        GROUP BY c.id
-        ORDER BY c.created_at DESC
-      `,[user.id]);
-
-      const list =
-        collections.rows.map(c => `
-          <div class="card">
-            <h3>📁 ${escapeHtml(c.name)}</h3>
-
-            <p>
-              ${c.item_count} پست ذخیره‌شده
-            </p>
-
-            <a class="btn"
-              href="/collection?id=${c.id}">
-              مشاهده
-            </a>
-
-            <a class="btn"
-              href="/collection-delete?id=${c.id}"
-              onclick="return confirm('این مجموعه حذف شود؟')">
-              حذف
-            </a>
-          </div>
-        `).join("");
-
-      sendPage(
-        res,
-        "مجموعه‌ها",
-        `
-        <div class="card">
-          <h2>📚 مجموعه‌های ذخیره‌شده</h2>
-
-          <form method="POST" action="/collection-create">
-            <input
-              name="name"
-              maxlength="100"
-              placeholder="نام مجموعه"
-              required
-            >
-            <button type="submit">
-              ایجاد مجموعه
-            </button>
-          </form>
-        </div>
-
-        ${list || `
-          <div class="card">
-            هنوز مجموعه‌ای ساخته نشده است.
-          </div>
-        `}
-        `
-      );
-      return;
-    }
-
-    if (req.method === "POST" && path === "/collection-create") {
-      const d = await readBody(req);
-
-      const name =
-        (d.get("name") || "").trim();
-
-      if (!name) {
-        redirect(res,"/collections");
-        return;
-      }
-
-      await pool.query(`
-        INSERT INTO collections(
-          user_id,
-          name
-        )
-        VALUES($1,$2)
-      `,[user.id,name.slice(0,100)]);
-
-      redirect(res,"/collections");
-      return;
-    }
-
-    if (req.method === "GET" && path === "/collection") {
-      const collectionId =
-        Number(url.searchParams.get("id"));
-
-      if (
-        !Number.isInteger(collectionId) ||
-        collectionId <= 0
-      ) {
-        redirect(res,"/collections");
-        return;
-      }
-
-      const collection = await pool.query(`
-        SELECT id,name
-        FROM collections
-        WHERE id=$1
-        AND user_id=$2
-      `,[collectionId,user.id]);
-
-      if (!collection.rows.length) {
-        redirect(res,"/collections");
-        return;
-      }
-
-      const posts = await pool.query(`
-        SELECT
-          p.*,
-          u.name AS user_name,
-          u.username
-        FROM collection_items ci
-        JOIN posts p
-          ON p.id=ci.post_id
-        JOIN users u
-          ON u.id=p.user_id
-        WHERE ci.collection_id=$1
-        ORDER BY p.created_at DESC
-      `,[collectionId]);
-
-      const body = posts.rows.map(p =>
-        renderPost(p,user.id)
-      ).join("");
-
-      sendPage(
-        res,
-        collection.rows[0].name,
-        `
-        <div class="card">
-          <h2>📁 ${escapeHtml(
-            collection.rows[0].name
-          )}</h2>
-        </div>
-
-        ${body || `
-          <div class="card">
-            این مجموعه خالی است.
-          </div>
-        `}
-        `
-      );
-      return;
-    }
-
-    if (req.method === "GET" && path === "/collection-add") {
-      const collectionId =
-        Number(url.searchParams.get("collection"));
-
-      const postId =
-        Number(url.searchParams.get("post"));
-
-      if (
-        !Number.isInteger(collectionId) ||
-        !Number.isInteger(postId) ||
-        collectionId <= 0 ||
-        postId <= 0
-      ) {
-        redirect(res,"/");
-        return;
-      }
-
-      const owner = await pool.query(`
-        SELECT 1
-        FROM collections
-        WHERE id=$1
-        AND user_id=$2
-      `,[collectionId,user.id]);
-
-      if (!owner.rows.length) {
-        redirect(res,"/");
-        return;
-      }
-
-      await pool.query(`
-        INSERT INTO collection_items(
-          collection_id,
-          post_id
-        )
-        VALUES($1,$2)
-        ON CONFLICT DO NOTHING
-      `,[collectionId,postId]);
-
-      redirect(res,`/post?id=${postId}`);
-      return;
-    }
-
-    if (req.method === "GET" && path === "/collection-remove") {
-      const collectionId =
-        Number(url.searchParams.get("collection"));
-
-      const postId =
-        Number(url.searchParams.get("post"));
-
-      if (
-        !Number.isInteger(collectionId) ||
-        !Number.isInteger(postId)
-      ) {
-        redirect(res,"/collections");
-        return;
-      }
-
-      await pool.query(`
-        DELETE FROM collection_items
-        WHERE collection_id=$1
-        AND post_id=$2
-        AND collection_id IN(
-          SELECT id
-          FROM collections
-          WHERE user_id=$3
-        )
-      `,[collectionId,postId,user.id]);
-
-      redirect(res,`/collection?id=${collectionId}`);
-      return;
-    }
-
-    if (req.method === "GET" && path === "/collection-delete") {
-      const collectionId =
-        Number(url.searchParams.get("id"));
-
-      if (
-        !Number.isInteger(collectionId) ||
-        collectionId <= 0
-      ) {
-        redirect(res,"/collections");
-        return;
-      }
-
-      await pool.query(`
-        DELETE FROM collection_items
-        WHERE collection_id=$1
-        AND collection_id IN(
-          SELECT id
-          FROM collections
-          WHERE user_id=$2
-        )
-      `,[collectionId,user.id]);
-
-      await pool.query(`
-        DELETE FROM collections
-        WHERE id=$1
-        AND user_id=$2
-      `,[collectionId,user.id]);
-
-      redirect(res,"/collections");
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // ARCHIVE POST
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/archive") {
-      const postId =
-        Number(url.searchParams.get("post"));
-
-      if (
-        !Number.isInteger(postId) ||
-        postId <= 0
-      ) {
-        redirect(res,"/");
-        return;
-      }
-
-      await pool.query(`
-        UPDATE posts
-        SET archived=NOT COALESCE(archived,FALSE)
-        WHERE id=$1
-        AND user_id=$2
-      `,[postId,user.id]);
-
-      redirect(res,`/post?id=${postId}`);
-      return;
-    }
-
-    if (req.method === "GET" && path === "/archived") {
-      const posts = await pool.query(`
-        SELECT
-          p.*,
-          u.name AS user_name,
-          u.username
-        FROM posts p
-        JOIN users u
-          ON u.id=p.user_id
-        WHERE p.user_id=$1
-        AND COALESCE(p.archived,FALSE)=TRUE
-        ORDER BY p.created_at DESC
-      `,[user.id]);
-
-      const body =
-        posts.rows.map(p =>
-          renderPost(p,user.id)
-        ).join("");
-
-      sendPage(
-        res,
-        "آرشیو",
-        `
-        <div class="card">
-          <h2>🗃 پست‌های آرشیوشده</h2>
-        </div>
-
-        ${body || `
-          <div class="card">
-            پست آرشیوشده‌ای وجود ندارد.
-          </div>
-        `}
-        `
-      );
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // PIN POST
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/pin") {
-      const postId =
-        Number(url.searchParams.get("post"));
-
-      if (
-        !Number.isInteger(postId) ||
-        postId <= 0
-      ) {
-        redirect(res,"/");
-        return;
-      }
-
-      await pool.query(`
-        UPDATE posts
-        SET pinned=NO  // ============================================================
-    // SECTION 6
-    // EXPLORE / DISCOVER / HASHTAGS / ANALYTICS / ACCOUNT ACTIVITY
-    // ============================================================
-
-    // ------------------------------------------------------------
-    // EXPLORE
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/explore") {
-      const q =
-        (url.searchParams.get("q") || "").trim();
-
-      let posts;
-
-      if (q) {
-        const search = `%${q}%`;
-
-        posts = await pool.query(`
-          SELECT
-            p.*,
-            u.name AS user_name,
-            u.username
-          FROM posts p
-          JOIN users u
-            ON u.id=p.user_id
-          WHERE
-            COALESCE(p.archived,FALSE)=FALSE
-            AND (
-              p.content ILIKE $1
-              OR u.name ILIKE $1
-              OR u.username ILIKE $1
-            )
-            AND NOT EXISTS (
-              SELECT 1
-              FROM blocked_users b
-              WHERE
-                (b.blocker_id=$2 AND b.blocked_id=p.user_id)
-                OR
-                (b.blocker_id=p.user_id AND b.blocked_id=$2)
-            )
-          ORDER BY p.created_at DESC
-          LIMIT 50
-        `,[search,user.id]);
-      } else {
-        posts = await pool.query(`
-          SELECT
-            p.*,
-            u.name AS user_name,
-            u.username
-          FROM posts p
-          JOIN users u
-            ON u.id=p.user_id
-          WHERE
-            COALESCE(p.archived,FALSE)=FALSE
-            AND NOT EXISTS (
-              SELECT 1
-              FROM blocked_users b
-              WHERE
-                (b.blocker_id=$1 AND b.blocked_id=p.user_id)
-                OR
-                (b.blocker_id=p.user_id AND b.blocked_id=$1)
-            )
-          ORDER BY p.created_at DESC
-          LIMIT 50
-        `,[user.id]);
-      }
-
-      const body =
-        posts.rows.map(p =>
-          renderPost(p,user.id)
-        ).join("");
-
-      sendPage(
-        res,
-        "اکسپلور",
-        `
-        <div class="card">
-          <h2>🔎 اکسپلور MySocial</h2>
-
-          <form method="GET" action="/explore">
-            <input
-              name="q"
-              value="${escapeHtml(q)}"
-              placeholder="جستجوی پست، نام یا نام کاربری..."
-              maxlength="100"
-            >
-            <button type="submit">
-              جستجو
-            </button>
-          </form>
-        </div>
-
-        ${body || `
-          <div class="card">
-            نتیجه‌ای پیدا نشد.
-          </div>
-        `}
-        `
-      );
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // HASHTAG DISCOVERY
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/discover-hashtags") {
-      const tags = await pool.query(`
-        SELECT
-          h.id,
-          h.tag,
-          COUNT(hp.post_id)::int AS post_count
-        FROM hashtags h
-        LEFT JOIN hashtag_posts hp
-          ON hp.hashtag_id=h.id
-        GROUP BY h.id
-        ORDER BY post_count DESC, h.tag ASC
-        LIMIT 50
-      `);
-
-      const body =
-        tags.rows.map(t => `
-          <div class="card">
-            <h3>
-              #${escapeHtml(t.tag)}
-            </h3>
-
-            <p>
-              ${t.post_count} پست
-            </p>
-
-            <a class="btn"
-              href="/hashtag?tag=${encodeURIComponent(t.tag)}">
-              مشاهده
-            </a>
-          </div>
-        `).join("");
-
-      sendPage(
-        res,
-        "هشتگ‌ها",
-        `
-        <div class="card">
-          <h2>🏷 هشتگ‌های محبوب</h2>
-        </div>
-
-        ${body || `
-          <div class="card">
-            هنوز هشتگی ثبت نشده است.
-          </div>
-        `}
-        `
-      );
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // REEL ANALYTICS
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/reel-analytics") {
-      const reels = await pool.query(`
-        SELECT
-          r.id,
-          r.caption,
-          r.created_at,
-          COUNT(DISTINCT rv.id)::int AS views,
-          COUNT(DISTINCT rl.id)::int AS likes,
-          COUNT(DISTINCT rc.id)::int AS comments,
-          COUNT(DISTINCT sh.id)::int AS shares
-        FROM reels r
-        LEFT JOIN reel_views rv
-          ON rv.reel_id=r.id
-        LEFT JOIN reel_likes rl
-          ON rl.reel_id=r.id
-        LEFT JOIN reel_comments rc
-          ON rc.reel_id=r.id
-        LEFT JOIN shares sh
-          ON sh.reel_id=r.id
-        WHERE r.user_id=$1
-        GROUP BY r.id
-        ORDER BY r.created_at DESC
-        LIMIT 100
-      `,[user.id]);
-
-      const rows =
-        reels.rows.map(r => `
-          <tr>
-            <td>${r.id}</td>
-            <td>${escapeHtml(r.caption || "")}</td>
-            <td>${r.views}</td>
-            <td>${r.likes}</td>
-            <td>${r.comments}</td>
-            <td>${r.shares}</td>
-          </tr>
-        `).join("");
-
-      sendPage(
-        res,
-        "آمار ریلز",
-        `
-        <div class="card">
-          <h2>📊 آمار ریلزهای من</h2>
-
-          <div style="overflow:auto">
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>عنوان</th>
-                  <th>بازدید</th>
-                  <th>لایک</th>
-                  <th>نظر</th>
-                  <th>اشتراک‌گذاری</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                ${rows || `
-                  <tr>
-                    <td colspan="6">
-                      هنوز ریلزی منتشر نکرده‌اید.
-                    </td>
-                  </tr>
-                `}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        `
-      );
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // POST ANALYTICS
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/post-analytics") {
-      const stats = await pool.query(`
-        SELECT
-          p.id,
-          LEFT(COALESCE(p.content,''),80) AS content,
-          COUNT(DISTINCT pv.id)::int AS views,
-          COUNT(DISTINCT l.user_id)::int AS likes,
-          COUNT(DISTINCT c.id)::int AS comments,
-          COUNT(DISTINCT s.id)::int AS shares
-        FROM posts p
-        LEFT JOIN post_views pv
-          ON pv.post_id=p.id
-        LEFT JOIN likes l
-          ON l.post_id=p.id
-        LEFT JOIN comments c
-          ON c.post_id=p.id
-        LEFT JOIN shares s
-          ON s.post_id=p.id
-        WHERE p.user_id=$1
-        GROUP BY p.id
-        ORDER BY p.created_at DESC
-        LIMIT 100
-      `,[user.id]);
-
-      const rows =
-        stats.rows.map(p => `
-          <tr>
-            <td>${p.id}</td>
-            <td>${escapeHtml(p.content || "")}</td>
-            <td>${p.views}</td>
-            <td>${p.likes}</td>
-            <td>${p.comments}</td>
-            <td>${p.shares}</td>
-          </tr>
-        `).join("");
-
-      sendPage(
-        res,
-        "آمار پست‌ها",
-        `
-        <div class="card">
-          <h2>📈 آمار پست‌های من</h2>
-
-          <div style="overflow:auto">
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>محتوا</th>
-                  <th>بازدید</th>
-                  <th>لایک</th>
-                  <th>نظر</th>
-                  <th>اشتراک‌گذاری</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                ${rows || `
-                  <tr>
-                    <td colspan="6">
-                      هنوز پستی منتشر نکرده‌اید.
-                    </td>
-                  </tr>
-                `}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        `
-      );
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // ACCOUNT ACTIVITY
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/account-activity") {
-      const activity = await pool.query(`
-        SELECT
-          id,
-          ip_address,
-          user_agent,
-          created_at
-        FROM login_activity
-        WHERE user_id=$1
-        ORDER BY created_at DESC
-        LIMIT 50
-      `,[user.id]);
-
-      const rows =
-        activity.rows.map(a => `
-          <div class="card">
-            <strong>🔐 ورود به حساب</strong>
-
-            <p>
-              زمان:
-              ${escapeHtml(
-                new Date(a.created_at).toLocaleString("fa-IR")
-              )}
-            </p>
-
-            <p>
-              IP:
-              ${escapeHtml(a.ip_address || "نامشخص")}
-            </p>
-
-            <p>
-              دستگاه:
-              ${escapeHtml(a.user_agent || "نامشخص")}
-            </p>
-          </div>
-        `).join("");
-
-      sendPage(
-        res,
-        "فعالیت حساب",
-        `
-        <div class="card">
-          <h2>🛡 فعالیت‌های اخیر حساب</h2>
-          <p>
-            ورودهای اخیر حساب در این بخش نمایش داده می‌شوند.
-          </p>
-        </div>
-
-        ${rows || `
-          <div class="card">
-            سابقه‌ای ثبت نشده است.
-          </div>
-        `}
-        `
-      );
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // PROFILE VISITS
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/profile-visits") {
-      const visits = await pool.query(`
-        SELECT
-          pv.created_at,
-          u.id,
-          u.name,
-          u.username
-        FROM profile_visits pv
-        JOIN users u
-          ON u.id=pv.visitor_id
-        WHERE pv.profile_id=$1
-        ORDER BY pv.created_at DESC
-        LIMIT 100
-      `,[user.id]);
-
-      const body =
-        visits.rows.map(v => `
-          <div class="card">
-            <strong>
-              ${escapeHtml(v.name || v.username || "کاربر")}
-            </strong>
-
-            <p>
-              @${escapeHtml(v.username || "")}
-            </p>
-
-            <p>
-              ${escapeHtml(
-                new Date(v.created_at).toLocaleString("fa-IR")
-              )}
-            </p>
-
-            <a class="btn"
-              href="/profile?id=${v.id}">
-              مشاهده پروفایل
-            </a>
-          </div>
-        `).join("");
-
-      sendPage(
-        res,
-        "بازدید پروفایل",
-        `
-        <div class="card">
-          <h2>👁 بازدیدهای پروفایل</h2>
-        </div>
-
-        ${body || `
-          <div class="card">
-            هنوز بازدیدی ثبت نشده است.
-          </div>
-        `}
-        `
-      );
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // LOG PROFILE VISIT
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/profile-visit") {
-      const profileId =
-        Number(url.searchParams.get("user"));
-
-      if (
-        !Number.isInteger(profileId) ||
-        profileId <= 0 ||
-        profileId === user.id
-      ) {
-        redirect(res,"/profile");
-        return;
-      }
-
-      const target = await pool.query(`
-        SELECT id
-        FROM users
-        WHERE id=$1
-      `,[profileId]);
-
-      if (target.rows.length) {
-        await pool.query(`
-          INSERT INTO profile_visits(
-            profile_id,
-            visitor_id
-          )
-          VALUES($1,$2)
-        `,[profileId,user.id]);
-      }
-
-      redirect(res,`/profile?id=${profileId}`);
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // ACCOUNT DASHBOARD
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/dashboard") {
-      const stats = await pool.query(`
-        SELECT
-          (SELECT COUNT(*) FROM posts
-            WHERE user_id=$1)::int AS posts,
-
-          (SELECT COUNT(*) FROM reels
-            WHERE user_id=$1)::int AS reels,
-
-          (SELECT COUNT(*) FROM followers
-            WHERE user_id=$1)::int AS followers
-      `,[user.id]).catch(() => null);
-
-      let postCount = 0;
-      let reelCount = 0;
-      let followerCount = 0;
-
-      const p = await pool.query(`
-        SELECT COUNT(*)::int AS count
-        FROM posts
-        WHERE user_id=$1
-      `,[user.id]);
-
-      const r = await pool.query(`
-        SELECT COUNT(*)::int AS count
-        FROM reels
-        WHERE user_id=$1
-      `,[user.id]);
-
-      const f = await pool.query(`
-        SELECT COUNT(*)::int AS count
-        FROM follows
-        WHERE following_id=$1
-      `,[user.id]);
-
-      postCount = p.rows[0].count;
-      reelCount = r.rows[0].count;
-      followerCount = f.rows[0].count;
-
-      sendPage(
-        res,
-        "داشبورد",
-        `
-        <div class="card">
-          <h2>📊 داشبورد MySocial</h2>
-
-          <div class="stats">
-            <div>
-              <strong>${postCount}</strong>
-              <span>پست</span>
-            </div>
-
-            <div>
-              <strong>${reelCount}</strong>
-              <span>ریلز</span>
-            </div>
-
-            <div>
-              <strong>${followerCount}</strong>
-              <span>دنبال‌کننده</span>
-            </div>
-          </div>
-
-          <div style="display:grid;gap:10px;margin-top:20px">
-            <a class="btn" href="/post-analytics">
-              📈 آمار پست‌ها
-            </a>
-
-            <a class="btn" href="/reel-analytics">
-              🎬 آمار ریلزها
-            </a>
-
-            <a class="btn" href="/profile-visits">
-              👁 بازدید پروفایل
-            </a>
-
-            <a class="btn" href="/account-activity">
-              🛡 فعالیت حساب
-            </a>
-
-            <a class="btn" href="/privacy">
-              🔐 حریم خصوصی
-            </a>
-          </div>
-        </div>
-        `
-      );
-      return;
-                                 }     // ============================================================
-    // SECTION 7
-    // ADS / CREATOR / SUBSCRIPTIONS / WALLET / PAYMENTS
-    // ============================================================
-
-    // ------------------------------------------------------------
-    // AD ACCOUNT
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/ads") {
-      const ads = await pool.query(`
-        SELECT
-          a.id,
-          a.title,
-          a.description,
-          a.target_url,
-          a.budget,
-          a.spent,
-          a.status,
-          a.created_at
-        FROM ads a
-        WHERE a.user_id=$1
-        ORDER BY a.created_at DESC
-      `,[user.id]);
-
-      const body = ads.rows.map(a => `
-        <div class="card">
-          <h3>📢 ${escapeHtml(a.title || "تبلیغ")}</h3>
-
-          <p>
-            ${escapeHtml(a.description || "")}
-          </p>
-
-          <p>
-            بودجه:
-            ${Number(a.budget || 0).toLocaleString("fa-IR")}
-          </p>
-
-          <p>
-            هزینه‌شده:
-            ${Number(a.spent || 0).toLocaleString("fa-IR")}
-          </p>
-
-          <p>
-            وضعیت:
-            ${escapeHtml(a.status || "draft")}
-          </p>
-
-          <a class="btn"
-             href="/ad-analytics?id=${a.id}">
-             📊 آمار
-          </a>
-        </div>
-      `).join("");
-
-      sendPage(
-        res,
-        "تبلیغات",
-        `
-        <div class="card">
-          <h2>📢 مدیریت تبلیغات</h2>
-
-          <form method="POST" action="/ad-create">
-            <input
-              name="title"
-              placeholder="عنوان تبلیغ"
-              maxlength="150"
-              required
-            >
-
-            <textarea
-              name="description"
-              placeholder="توضیحات تبلیغ"
-              maxlength="1000"
-            ></textarea>
-
-            <input
-              name="target_url"
-              placeholder="https://example.com"
-              maxlength="1000"
-              required
-            >
-
-            <input
-              name="budget"
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="بودجه"
-              required
-            >
-
-            <button type="submit">
-              ایجاد تبلیغ
-            </button>
-          </form>
-        </div>
-
-        ${body || `
-          <div class="card">
-            هنوز تبلیغی ایجاد نکرده‌اید.
-          </div>
-        `}
-        `
-      );
-      return;
-    }
-
-    if (req.method === "POST" && path === "/ad-create") {
-      const d = await readBody(req);
-
-      const title =
-        (d.get("title") || "").trim();
-
-      const description =
-        (d.get("description") || "").trim();
-
-      const targetUrl =
-        (d.get("target_url") || "").trim();
-
-      const budget =
-        Number(d.get("budget") || 0);
-
-      if (
-        !title ||
-        !targetUrl ||
-        !Number.isFinite(budget) ||
-        budget < 0
-      ) {
-        redirect(res,"/ads");
-        return;
-      }
-
-      let parsedUrl;
-
-      try {
-        parsedUrl = new URL(targetUrl);
-      } catch {
-        redirect(res,"/ads");
-        return;
-      }
-
-      if (
-        parsedUrl.protocol !== "http:" &&
-        parsedUrl.protocol !== "https:"
-      ) {
-        redirect(res,"/ads");
-        return;
-      }
-
-      await pool.query(`
-        INSERT INTO ads(
-          user_id,
-          title,
-          description,
-          target_url,
-          budget,
-          spent,
-          status
-        )
-        VALUES($1,$2,$3,$4,$5,0,'draft')
-      `,[
-        user.id,
-        title.slice(0,150),
-        description.slice(0,1000),
-        parsedUrl.toString(),
-        budget
-      ]);
-
-      redirect(res,"/ads");
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // AD START / PAUSE
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/ad-toggle") {
-      const adId =
-        Number(url.searchParams.get("id"));
-
-      if (
-        !Number.isInteger(adId) ||
-        adId <= 0
-      ) {
-        redirect(res,"/ads");
-        return;
-      }
-
-      const ad = await pool.query(`
-        SELECT status
-        FROM ads
-        WHERE id=$1
-        AND user_id=$2
-      `,[adId,user.id]);
-
-      if (!ad.rows.length) {
-        redirect(res,"/ads");
-        return;
-      }
-
-      const current =
-        ad.rows[0].status || "draft";
-
-      const next =
-        current === "active"
-          ? "paused"
-          : "active";
-
-      await pool.query(`
-        UPDATE ads
-        SET status=$1
-        WHERE id=$2
-        AND user_id=$3
-      `,[next,adId,user.id]);
-
-      redirect(res,"/ads");
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // AD ANALYTICS
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/ad-analytics") {
-      const adId =
-        Number(url.searchParams.get("id"));
-
-      if (
-        !Number.isInteger(adId) ||
-        adId <= 0
-      ) {
-        redirect(res,"/ads");
-        return;
-      }
-
-      const ad = await pool.query(`
-        SELECT
-          id,
-          title,
-          budget,
-          spent,
-          status
-        FROM ads
-        WHERE id=$1
-        AND user_id=$2
-      `,[adId,user.id]);
-
-      if (!ad.rows.length) {
-        redirect(res,"/ads");
-        return;
-      }
-
-      const events = await pool.query(`
-        SELECT
-          event_type,
-          COUNT(*)::int AS count
-        FROM ad_events
-        WHERE ad_id=$1
-        GROUP BY event_type
-        ORDER BY event_type
-      `,[adId]);
-
-      const rows = events.rows.map(e => `
-        <tr>
-          <td>${escapeHtml(e.event_type)}</td>
-          <td>${e.count}</td>
-        </tr>
-      `).join("");
-
-      sendPage(
-        res,
-        "آمار تبلیغ",
-        `
-        <div class="card">
-          <h2>📊 ${escapeHtml(
-            ad.rows[0].title
-          )}</h2>
-
-          <p>
-            بودجه:
-            ${Number(ad.rows[0].budget || 0)
-              .toLocaleString("fa-IR")}
-          </p>
-
-          <p>
-            هزینه:
-            ${Number(ad.rows[0].spent || 0)
-              .toLocaleString("fa-IR")}
-          </p>
-
-          <p>
-            وضعیت:
-            ${escapeHtml(ad.rows[0].status || "")}
-          </p>
-        </div>
-
-        <div class="card">
-          <h3>رویدادها</h3>
-
-          <table>
-            <thead>
-              <tr>
-                <th>نوع</th>
-                <th>تعداد</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              ${rows || `
-                <tr>
-                  <td colspan="2">
-                    هنوز داده‌ای ثبت نشده است.
-                  </td>
-                </tr>
-              `}
-            </tbody>
-          </table>
-        </div>
-        `
-      );
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // CREATOR ACCOUNT
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/creator") {
-      const creator = await pool.query(`
-        SELECT
-          ca.id,
-          ca.display_name,
-          ca.bio,
-          ca.status,
-          COALESCE(
-            SUM(
-              CASE
-                WHEN ct.type='earning'
-                THEN ct.amount
-                ELSE 0
-              END
-            ),0
-          ) AS earnings
-        FROM creator_accounts ca
-        LEFT JOIN creator_transactions ct
-          ON ct.creator_id=ca.id
-        WHERE ca.user_id=$1
-        GROUP BY ca.id
-      `,[user.id]);
-
-      if (!creator.rows.length) {
-        sendPage(
-          res,
-          "حساب سازنده",
-          `
-          <div class="card">
-            <h2>⭐ حساب سازنده</h2>
-
-            <p>
-              با فعال‌کردن حساب سازنده می‌توانید
-              امکانات حرفه‌ای درآمدزایی را مدیریت کنید.
-            </p>
-
-            <form method="POST"
-                  action="/creator-enable">
-              <input
-                name="display_name"
-                maxlength="100"
-                placeholder="نام سازنده"
-                required
-              >
-
-              <textarea
-                name="bio"
-                maxlength="1000"
-                placeholder="معرفی کوتاه"
-              ></textarea>
-
-              <button type="submit">
-                فعال‌سازی
-              </button>
-            </form>
-          </div>
-          `
-        );
-        return;
-      }
-
-      const c = creator.rows[0];
-
-      sendPage(
-        res,
-        "داشبورد سازنده",
-        `
-        <div class="card">
-          <h2>⭐ ${escapeHtml(
-            c.display_name || user.name
-          )}</h2>
-
-          <p>
-            ${escapeHtml(c.bio || "")}
-          </p>
-
-          <p>
-            وضعیت:
-            ${escapeHtml(c.status || "active")}
-          </p>
-
-          <p>
-            درآمد ثبت‌شده:
-            ${Number(c.earnings || 0)
-              .toLocaleString("fa-IR")}
-          </p>
-
-          <div style="display:grid;gap:10px">
-            <a class="btn" href="/creator-subscriptions">
-              💎 اشتراک‌های من
-            </a>
-
-            <a class="btn" href="/creator-transactions">
-              💰 تراکنش‌ها
-            </a>
-
-            <a class="btn" href="/creator-payouts">
-              🏦 برداشت‌ها
-            </a>
-          </div>
-        </div>
-        `
-      );
-      return;
-    }
-
-    if (req.method === "POST" && path === "/creator-enable") {
-      const d = await readBody(req);
-
-      const displayName =
-        (d.get("display_name") || "").trim();
-
-      const bio =
-        (d.get("bio") || "").trim();
-
-      if (!displayName) {
-        redirect(res,"/creator");
-        return;
-      }
-
-      await pool.query(`
-        INSERT INTO creator_accounts(
-          user_id,
-          display_name,
-          bio,
-          status
-        )
-        VALUES($1,$2,$3,'active')
-        ON CONFLICT(user_id)
-        DO UPDATE SET
-          display_name=EXCLUDED.display_name,
-          bio=EXCLUDED.bio,
-          status='active'
-      `,[
-        user.id,
-        displayName.slice(0,100),
-        bio.slice(0,1000)
-      ]);
-
-      redirect(res,"/creator");
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // CREATOR TRANSACTIONS
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/creator-transactions") {
-      const rows = await pool.query(`
-        SELECT
-          id,
-          type,
-          amount,
-          description,
-          created_at
-        FROM creator_transactions
-        WHERE creator_id IN(
-          SELECT id
-          FROM creator_accounts
-          WHERE user_id=$1
-        )
-        ORDER BY created_at DESC
-        LIMIT 100
-      `,[user.id]);
-
-      const body = rows.rows.map(t => `
-        <div class="card">
-          <strong>
-            ${escapeHtml(t.type || "")}
-          </strong>
-
-          <p>
-            مبلغ:
-            ${Number(t.amount || 0)
-              .toLocaleString("fa-IR")}
-          </p>
-
-          <p>
-            ${escapeHtml(t.description || "")}
-          </p>
-
-          <small>
-            ${escapeHtml(
-              new Date(t.created_at)
-                .toLocaleString("fa-IR")
-            )}
-          </small>
-        </div>
-      `).join("");
-
-      sendPage(
-        res,
-        "تراکنش‌های سازنده",
-        `
-        <div class="card">
-          <h2>💰 تراکنش‌های سازنده</h2>
-        </div>
-
-        ${body || `
-          <div class="card">
-            تراکنشی ثبت نشده است.
-          </div>
-        `}
-        `
-      );
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // CREATOR PAYOUTS
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/creator-payouts") {
-      const payouts = await pool.query(`
-        SELECT
-          id,
-          amount,
-          status,
-          created_at
-        FROM creator_payouts
-        WHERE creator_id IN(
-          SELECT id
-          FROM creator_accounts
-          WHERE user_id=$1
-        )
-        ORDER BY created_at DESC
-        LIMIT 100
-      `,[user.id]);
-
-      const body = payouts.rows.map(p => `
-        <div class="card">
-          <strong>
-            برداشت:
-            ${Number(p.amount || 0)
-              .toLocaleString("fa-IR")}
-          </strong>
-
-          <p>
-            وضعیت:
-            ${escapeHtml(p.status || "pending")}
-          </p>
-
-          <small>
-            ${escapeHtml(
-              new Date(p.created_at)
-                .toLocaleString("fa-IR")
-            )}
-          </small>
-        </div>
-      `).join("");
-
-      sendPage(
-        res,
-        "برداشت درآمد",
-        `
-        <div class="card">
-          <h2>🏦 برداشت درآمد</h2>
-
-          <form method="POST"
-                action="/creator-payout">
-            <input
-              name="amount"
-              type="number"
-              min="1"
-              step="0.01"
-              placeholder="مبلغ برداشت"
-              required
-            >
-
-            <button type="submit">
-              درخواست برداشت
-            </button>
-          </form>
-        </div>
-
-        ${body}
-        `
-      );
-      return;
-    }
-
-    if (req.method === "POST" && path === "/creator-payout") {
-      const d = await readBody(req);
-
-      const amount =
-        Number(d.get("amount") || 0);
-
-      if (
-        !Number.isFinite(amount) ||
-        amount <= 0
-      ) {
-        redirect(res,"/creator-payouts");
-        return;
-      }
-
-      const creator = await pool.query(`
-        SELECT id
-        FROM creator_accounts
-        WHERE user_id=$1
-        AND status='active'
-        LIMIT 1
-      `,[user.id]);
-
-      if (!creator.rows.length) {
-        redirect(res,"/creator");
-        return;
-      }
-
-      const creatorId =
-        creator.rows[0].id;
-
-      const earnings = await pool.query(`
-        SELECT
-          COALESCE(SUM(
-            CASE
-              WHEN type='earning'
-              THEN amount
-              WHEN type='payout'
-              THEN -amount
-              ELSE 0
-            END
-          ),0) AS balance
-        FROM creator_transactions
-        WHERE creator_id=$1
-      `,[creatorId]);
-
-      const balance =
-        Number(earnings.rows[0].balance || 0);
-
-      if (amount > balance) {
-        redirect(res,"/creator-payouts");
-        return;
-      }
-
-      await pool.query(`
-        INSERT INTO creator_payouts(
-          creator_id,
-          amount,
-          status
-        )
-        VALUES($1,$2,'pending')
-      `,[creatorId,amount]);
-
-      await pool.query(`
-        INSERT INTO creator_transactions(
-          creator_id,
-          type,
-          amount,
-          description
-        )
-        VALUES(
-          $1,
-          'payout',
-          $2,
-          'درخواست برداشت درآمد'
-        )
-      `,[creatorId,amount]);
+    INSERT INTO notifications(user_id,actor_id,type,post_id,message)
+    VALUES($1,$2,$3,$4,$5)
+  `,[userId,actorId,type,postId || null,message]);
+}
+
+function sendJson(res,statusOrData,dataMaybe){const status=typeof statusOrData==="number"?statusOrData:200;const data=typeof statusOrData==="number"?dataMaybe:statusOrData;if(res.headersSent)return;res.writeHead(status,{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store"});res.end(JSON.stringify(data??{}));}
+function sendPage(res,title,content,user=null){return sendHtml(res,200,title,content,user);}
+function isSafeInteger(v){return Number.isInteger(Number(v))&&Number(v)>0;}
+function validHttpUrl(v){try{const u=new URL(String(v));return u.protocol==="http:"||u.protocol==="https:";}catch{return false;}}
+async function ensureNotificationPreferences(userId){try{await pool.query(`INSERT INTO notification_preferences(userId) VALUES($1) ON CONFLICT(userId) DO NOTHING`,[userId]);}catch{}}         `,[creatorId,amount]);
 
       redirect(res,"/creator-payouts");
       return;
@@ -6347,16 +1221,1015 @@ async function createTables() {
 
       redirect(res,"/payments");
       return;
-    }  // ============================================================
-    // SECTION 8
-    // PAID CONTENT / LIVE / ACCOUNT / HEALTH
-    // ============================================================
+    }
+
+ /* EXTRA FEATURE SECTION 8 */
+ if (req.method === "GET" && path === "/paid-content") {
+      const result = await pool.query(`
+        SELECT
+          pc.id,
+          pc.title,
+          pc.description,
+          pc.price,
+          pc.media_url,
+          pc.created_at,
+          u.id AS creator_id,
+          u.name AS creator_name
+        FROM paid_content pc
+        JOIN users u ON u.id=pc.creator_id
+        WHERE pc.creator_id=$1
+        ORDER BY pc.created_at DESC
+      `,[user.id]);
+
+      sendPage(
+        res,
+        "محتوای پولی",
+        `
+        <div class="card">
+          <h2>محتوای پولی</h2>
+
+          <form method="POST" action="/paid-content-create">
+            <input
+              name="title"
+              placeholder="عنوان محتوا"
+              required
+              maxlength="200"
+            >
+
+            <textarea
+              name="description"
+              placeholder="توضیحات محتوا"
+              maxlength="5000"
+            ></textarea>
+
+            <input
+              name="media_url"
+              placeholder="لینک تصویر یا ویدیو"
+              maxlength="1000"
+            >
+
+            <input
+              name="price"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="قیمت"
+              required
+            >
+
+            <button type="submit">
+              ایجاد محتوای پولی
+            </button>
+          </form>
+        </div>
+
+        ${
+          result.rows.map(p => `
+            <div class="card">
+              <h3>${escapeHtml(p.title)}</h3>
+
+              <p>
+                ${escapeHtml(p.description || "")}
+              </p>
+
+              ${
+                p.media_url
+                  ? `<p><a href="${escapeHtml(p.media_url)}" target="_blank">مشاهده رسانه</a></p>`
+                  : ""
+              }
+
+              <strong>
+                قیمت: ${Number(p.price).toLocaleString("fa-IR")}
+              </strong>
+
+              <p>
+                شناسه محتوا: ${p.id}
+              </p>
+            </div>
+          `).join("")
+        }
+        `
+      );
+
+      return;
+    }
+
+    if (req.method === "POST" && path === "/paid-content-create") {
+      const d = await readBody(req);
+
+      const title =
+        (d.get("title") || "").trim();
+
+      const description =
+        (d.get("description") || "").trim();
+
+      const mediaUrl =
+        (d.get("media_url") || "").trim();
+
+      const price =
+        Number(d.get("price"));
+
+      if (
+        !title ||
+        !Number.isFinite(price) ||
+        price < 0
+      ) {
+        redirect(res,"/paid-content");
+        return;
+      }
+
+      await pool.query(`
+        INSERT INTO paid_content(
+          creator_id,
+          title,
+          description,
+          price,
+          media_url
+        )
+        VALUES($1,$2,$3,$4,$5)
+      `,[
+        user.id,
+        title,
+        description || null,
+        price,
+        mediaUrl || null
+      ]);
+
+      redirect(res,"/paid-content");
+      return;
+    }
+
+    if (req.method === "GET" && path === "/paid-content-buy") {
+      const contentId =
+        Number(url.searchParams.get("id"));
+
+      if (
+        !Number.isInteger(contentId) ||
+        contentId <= 0
+      ) {
+        redirect(res,"/");
+        return;
+      }
+
+      const content = await pool.query(`
+        SELECT
+          pc.id,
+          pc.creator_id,
+          pc.title,
+          pc.description,
+          pc.price,
+          pc.media_url,
+          u.name AS creator_name
+        FROM paid_content pc
+        JOIN users u ON u.id=pc.creator_id
+        WHERE pc.id=$1
+      `,[contentId]);
+
+      if (!content.rows.length) {
+        redirect(res,"/");
+        return;
+      }
+
+      const p = content.rows[0];
+
+      if (p.creator_id === user.id) {
+        redirect(
+          res,
+          `/paid-content?id=${contentId}`
+        );
+        return;
+      }
+
+      const purchased = await pool.query(`
+        SELECT 1
+        FROM paid_content_purchases
+        WHERE content_id=$1
+        AND buyer_id=$2
+        LIMIT 1
+      `,[contentId,user.id]);
+
+      if (purchased.rows.length) {
+        sendPage(
+          res,
+          "محتوای خریداری‌شده",
+          `
+          <div class="card">
+            <h2>${escapeHtml(p.title)}</h2>
+            <p>${escapeHtml(p.description || "")}</p>
+
+            ${
+              p.media_url
+                ? `
+                  <p>
+                    <a
+                      href="${escapeHtml(p.media_url)}"
+                      target="_blank"
+                    >
+                      مشاهده محتوا
+                    </a>
+                  </p>
+                `
+                : ""
+            }
+
+            <p>این محتوا قبلاً خریداری شده است.</p>
+          </div>
+          `
+        );
+
+        return;
+      }
+
+      const order = await pool.query(`
+        INSERT INTO payment_orders(
+          user_id,
+          amount,
+          status,
+          description
+        )
+        VALUES(
+          $1,
+          $2,
+          'pending',
+          $3
+        )
+        RETURNING id
+      `,[
+        user.id,
+        p.price,
+        `خرید محتوای پولی #${contentId}`
+      ]);
+
+      sendPage(
+        res,
+        "خرید محتوا",
+        `
+        <div class="card">
+          <h2>خرید محتوا</h2>
+
+          <p>
+            ${escapeHtml(p.title)}
+          </p>
+
+          <p>
+            قیمت:
+            ${Number(p.price).toLocaleString("fa-IR")}
+          </p>
+
+          <form method="POST" action="/paid-content-confirm">
+            <input
+              type="hidden"
+              name="order_id"
+              value="${order.rows[0].id}"
+            >
+
+            <input
+              type="hidden"
+              name="content_id"
+              value="${contentId}"
+            >
+
+            <button type="submit">
+              تأیید خرید
+            </button>
+          </form>
+        </div>
+        `
+      );
+
+      return;
+    }
+
+    if (
+      req.method === "POST" &&
+      path === "/paid-content-confirm"
+    ) {
+      const d = await readBody(req);
+
+      const orderId =
+        Number(d.get("order_id"));
+
+      const contentId =
+        Number(d.get("content_id"));
+
+      if (
+        !Number.isInteger(orderId) ||
+        orderId <= 0 ||
+        !Number.isInteger(contentId) ||
+        contentId <= 0
+      ) {
+        redirect(res,"/");
+        return;
+      }
+
+      const client = await pool.connect();
+
+      try {
+        await client.query("BEGIN");
+
+        const order = await client.query(`
+          SELECT
+            id,
+            amount,
+            status,
+            description
+          FROM payment_orders
+          WHERE id=$1
+          AND user_id=$2
+          FOR UPDATE
+        `,[orderId,user.id]);
+
+        const content = await client.query(`
+          SELECT
+            id,
+            creator_id,
+            price
+          FROM paid_content
+          WHERE id=$1
+          FOR UPDATE
+        `,[contentId]);
+
+        if (
+          !order.rows.length ||
+          !content.rows.length
+        ) {
+          await client.query("ROLLBACK");
+          redirect(res,"/");
+          return;
+        }
+
+        const o = order.rows[0];
+        const c = content.rows[0];
+
+        if (
+          o.status === "pending" &&
+          Number(o.amount) >= Number(c.price)
+        ) {
+          await client.query(`
+            UPDATE payment_orders
+            SET
+              status='paid',
+              paid_at=NOW()
+            WHERE id=$1
+          `,[orderId]);
+
+          await client.query(`
+            INSERT INTO paid_content_purchases(
+              content_id,
+              buyer_id,
+              amount
+            )
+            VALUES($1,$2,$3)
+            ON CONFLICT DO NOTHING
+          `,[
+            contentId,
+            user.id,
+            c.price
+          ]);
+
+          await client.query(`
+            INSERT INTO creator_transactions(
+              creator_id,
+              user_id,
+              amount,
+              type,
+              description
+            )
+            VALUES(
+              $1,
+              $2,
+              $3,
+              'sale',
+              $4
+            )
+          `,[
+            c.creator_id,
+            user.id,
+            c.price,
+            `فروش محتوای پولی #${contentId}`
+          ]);
+
+          await notify(
+            c.creator_id,
+            user.id,
+            "payment",
+            contentId,
+            `${user.name} محتوای پولی شما را خریداری کرد.`
+          );
+        }
+
+        await client.query("COMMIT");
+
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      redirect(
+        res,
+        `/paid-content-buy?id=${contentId}`
+      );
+
+      return;
+    }
 
     // ------------------------------------------------------------
-    // PAID CONTENT
+    // LIVE STREAMS
     // ------------------------------------------------------------
 
-    if (req.method === "GET" && path === "/paid-content") {
+    if (req.method === "GET" && path === "/live") {
+      const live = await pool.query(`
+        SELECT
+          l.id,
+          l.title,
+          l.status,
+          l.started_at,
+          l.ended_at,
+          u.id AS user_id,
+          u.name AS user_name,
+          (
+            SELECT COUNT(*)
+            FROM live_viewers v
+            WHERE v.live_id=l.id
+          ) AS viewers
+        FROM live_streams l
+        JOIN users u ON u.id=l.user_id
+        WHERE l.status='live'
+        ORDER BY l.started_at DESC
+      `);
+
+      sendPage(
+        res,
+        "پخش زنده",
+        `
+        <div class="card">
+          <h2>پخش زنده</h2>
+
+          <form method="POST" action="/live-start">
+            <input
+              name="title"
+              placeholder="عنوان پخش زنده"
+              required
+              maxlength="200"
+            >
+
+            <button type="submit">شروع پخش زنده</button>
+          </form>
+        </div>
+        `
+      );
+      return;
+    }       `,[creatorId,amount]);
+
+      redirect(res,"/creator-payouts");
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // SUBSCRIPTION PLANS
+    // ------------------------------------------------------------
+
+    if (req.method === "GET" && path === "/plans") {
+      const plans = await pool.query(`
+        SELECT
+          id,
+          name,
+          description,
+          price,
+          duration_days,
+          creator_id
+        FROM subscription_plans
+        WHERE active=TRUE
+        ORDER BY price ASC
+      `);
+
+      const body = plans.rows.map(p => `
+        <div class="card">
+          <h3>💎 ${escapeHtml(p.name)}</h3>
+
+          <p>
+            ${escapeHtml(p.description || "")}
+          </p>
+
+          <p>
+            قیمت:
+            ${Number(p.price || 0)
+              .toLocaleString("fa-IR")}
+          </p>
+
+          <p>
+            مدت:
+            ${Number(p.duration_days || 0)} روز
+          </p>
+
+          <form method="POST"
+                action="/subscribe">
+            <input
+              type="hidden"
+              name="plan_id"
+              value="${p.id}"
+            >
+
+            <button type="submit">
+              خرید اشتراک
+            </button>
+          </form>
+        </div>
+      `).join("");
+
+      sendPage(
+        res,
+        "اشتراک‌ها",
+        `
+        <div class="card">
+          <h2>💎 پلن‌های اشتراک</h2>
+        </div>
+
+        ${body || `
+          <div class="card">
+            پلن فعالی وجود ندارد.
+          </div>
+        `}
+        `
+      );
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // USER SUBSCRIPTIONS
+    // ------------------------------------------------------------
+
+    if (req.method === "GET" && path === "/my-subscriptions") {
+      const subscriptions = await pool.query(`
+        SELECT
+          us.id,
+          us.status,
+          us.started_at,
+          us.expires_at,
+          sp.name,
+          sp.price
+        FROM user_subscriptions us
+        JOIN subscription_plans sp
+          ON sp.id=us.plan_id
+        WHERE us.user_id=$1
+        ORDER BY us.started_at DESC
+      `,[user.id]);
+
+      const body =
+        subscriptions.rows.map(s => `
+          <div class="card">
+            <h3>💎 ${escapeHtml(s.name)}</h3>
+
+            <p>
+              وضعیت:
+              ${escapeHtml(s.status || "")}
+            </p>
+
+            <p>
+              شروع:
+              ${escapeHtml(
+                new Date(s.started_at)
+                  .toLocaleString("fa-IR")
+              )}
+            </p>
+
+            <p>
+              پایان:
+              ${escapeHtml(
+                new Date(s.expires_at)
+                  .toLocaleString("fa-IR")
+              )}
+            </p>
+          </div>
+        `).join("");
+
+      sendPage(
+        res,
+        "اشتراک‌های من",
+        `
+        <div class="card">
+          <h2>💎 اشتراک‌های من</h2>
+
+          <a class="btn" href="/plans">
+            مشاهده پلن‌ها
+          </a>
+        </div>
+
+        ${body || `
+          <div class="card">
+            اشتراک فعالی ندارید.
+          </div>
+        `}
+        `
+      );
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // WALLET
+    // ------------------------------------------------------------
+
+    if (req.method === "GET" && path === "/wallet") {
+      const wallet = await pool.query(`
+        SELECT
+          id,
+          balance,
+          currency
+        FROM wallet_accounts
+        WHERE user_id=$1
+      `,[user.id]);
+
+      const transactions = await pool.query(`
+        SELECT
+          type,
+          amount,
+          description,
+          created_at
+        FROM wallet_transactions
+        WHERE user_id=$1
+        ORDER BY created_at DESC
+        LIMIT 50
+      `,[user.id]);
+
+      const balance =
+        wallet.rows.length
+          ? Number(wallet.rows[0].balance || 0)
+          : 0;
+
+      const rows =
+        transactions.rows.map(t => `
+          <tr>
+            <td>${escapeHtml(t.type || "")}</td>
+            <td>${Number(t.amount || 0)
+              .toLocaleString("fa-IR")}</td>
+            <td>${escapeHtml(
+              t.description || ""
+            )}</td>
+          </tr>
+        `).join("");
+
+      sendPage(
+        res,
+        "کیف پول",
+        `
+        <div class="card">
+          <h2>👛 کیف پول</h2>
+
+          <h1>
+            ${balance.toLocaleString("fa-IR")}
+          </h1>
+
+          <p>
+            موجودی کیف پول
+          </p>
+        </div>
+
+        <div class="card">
+          <h3>تراکنش‌ها</h3>
+
+          <table>
+            <thead>
+              <tr>
+                <th>نوع</th>
+                <th>مبلغ</th>
+                <th>توضیحات</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${rows || `
+                <tr>
+                  <td colspan="3">
+                    تراکنشی وجود ندارد.
+                  </td>
+                </tr>
+              `}
+            </tbody>
+          </table>
+        </div>
+        `
+      );
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // PAYMENT ORDERS
+    // ------------------------------------------------------------
+
+    if (req.method === "GET" && path === "/payments") {
+      const orders = await pool.query(`
+        SELECT
+          id,
+          amount,
+          currency,
+          status,
+          description,
+          created_at
+        FROM payment_orders
+        WHERE user_id=$1
+        ORDER BY created_at DESC
+        LIMIT 100
+      `,[user.id]);
+
+      const body =
+        orders.rows.map(o => `
+          <div class="card">
+            <strong>
+              سفارش #${o.id}
+            </strong>
+
+            <p>
+              مبلغ:
+              ${Number(o.amount || 0)
+                .toLocaleString("fa-IR")}
+              ${escapeHtml(o.currency || "")}
+            </p>
+
+            <p>
+              وضعیت:
+              ${escapeHtml(o.status || "")}
+            </p>
+
+            <p>
+              ${escapeHtml(o.description || "")}
+            </p>
+          </div>
+        `).join("");
+
+      sendPage(
+        res,
+        "پرداخت‌ها",
+        `
+        <div class="card">
+          <h2>💳 پرداخت‌ها</h2>
+        </div>
+
+        ${body || `
+          <div class="card">
+            سفارش پرداختی وجود ندارد.
+          </div>
+        `}
+        `
+      );
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // SUBSCRIBE
+    // ------------------------------------------------------------
+
+    if (req.method === "POST" && path === "/subscribe") {
+      const d = await readBody(req);
+
+      const planId =
+        Number(d.get("plan_id"));
+
+      if (
+        !Number.isInteger(planId) ||
+        planId <= 0
+      ) {
+        redirect(res,"/plans");
+        return;
+      }
+
+      const plan = await pool.query(`
+        SELECT
+          id,
+          price,
+          duration_days
+        FROM subscription_plans
+        WHERE id=$1
+        AND active=TRUE
+      `,[planId]);
+
+      if (!plan.rows.length) {
+        redirect(res,"/plans");
+        return;
+      }
+
+      const p = plan.rows[0];
+
+      if (Number(p.price) <= 0) {
+        const started = new Date();
+        const expires =
+          new Date(
+            started.getTime() +
+            Number(p.duration_days || 30) *
+            86400000
+          );
+
+        await pool.query(`
+          INSERT INTO user_subscriptions(
+            user_id,
+            plan_id,
+            status,
+            started_at,
+            expires_at
+          )
+          VALUES($1,$2,'active',$3,$4)
+        `,[
+          user.id,
+          planId,
+          started,
+          expires
+        ]);
+
+        redirect(res,"/my-subscriptions");
+        return;
+      }
+
+      const order = await pool.query(`
+        INSERT INTO payment_orders(
+          user_id,
+          amount,
+          currency,
+          status,
+          description
+        )
+        VALUES(
+          $1,
+          $2,
+          'IRR',
+          'pending',
+          $3
+        )
+        RETURNING id
+      `,[
+        user.id,
+        Number(p.price),
+        `خرید پلن اشتراک #${planId}`
+      ]);
+
+      redirect(
+        res,
+        `/payment?id=${order.rows[0].id}`
+      );
+
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // PAYMENT PAGE
+    // ------------------------------------------------------------
+
+    if (req.method === "GET" && path === "/payment") {
+      const orderId =
+        Number(url.searchParams.get("id"));
+
+      if (
+        !Number.isInteger(orderId) ||
+        orderId <= 0
+      ) {
+        redirect(res,"/payments");
+        return;
+      }
+
+      const order = await pool.query(`
+        SELECT
+          id,
+          amount,
+          currency,
+          status,
+          description
+        FROM payment_orders
+        WHERE id=$1
+        AND user_id=$2
+      `,[orderId,user.id]);
+
+      if (!order.rows.length) {
+        redirect(res,"/payments");
+        return;
+      }
+
+      const o = order.rows[0];
+
+      sendPage(
+        res,
+        "پرداخت",
+        `
+        <div class="card">
+          <h2>💳 پرداخت سفارش #${o.id}</h2>
+
+          <p>
+            ${escapeHtml(o.description || "")}
+          </p>
+
+          <h2>
+            ${Number(o.amount || 0)
+              .toLocaleString("fa-IR")}
+            ${escapeHtml(o.currency || "")}
+          </h2>
+
+          <p>
+            وضعیت:
+            ${escapeHtml(o.status || "")}
+          </p>
+
+          <form method="POST"
+                action="/payment-confirm">
+            <input
+              type="hidden"
+              name="order_id"
+              value="${o.id}"
+            >
+
+            <button type="submit">
+              شبیه‌سازی تأیید پرداخت
+            </button>
+          </form>
+        </div>
+        `
+      );
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // PAYMENT CONFIRMATION
+    // ------------------------------------------------------------
+
+    if (req.method === "POST" && path === "/payment-confirm") {
+      const d = await readBody(req);
+
+      const orderId =
+        Number(d.get("order_id"));
+
+      if (
+        !Number.isInteger(orderId) ||
+        orderId <= 0
+      ) {
+        redirect(res,"/payments");
+        return;
+      }
+
+      const client = await pool.connect();
+
+      try {
+        await client.query("BEGIN");
+
+        const order = await client.query(`
+          SELECT
+            id,
+            amount,
+            status,
+            description
+          FROM payment_orders
+          WHERE id=$1
+          AND user_id=$2
+          FOR UPDATE
+        `,[orderId,user.id]);
+
+        if (!order.rows.length) {
+          await client.query("ROLLBACK");
+          redirect(res,"/payments");
+          return;
+        }
+
+        const o = order.rows[0];
+
+        if (o.status !== "paid") {
+          await client.query(`
+            UPDATE payment_orders
+            SET status='paid',
+                paid_at=NOW()
+            WHERE id=$1
+          `,[orderId]);
+
+          await client.query(`
+            INSERT INTO wallet_transactions(
+              user_id,
+              type,
+              amount,
+              description
+            )
+            VALUES(
+              $1,
+              'payment',
+              0,
+              $2
+            )
+          `,[
+            user.id,
+            `پرداخت سفارش #${orderId}`
+          ]);
+        }
+
+        await client.query("COMMIT");
+
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      redirect(res,"/payments");
+      return;
+    }
+
+ /* EXTRA FEATURE SECTION 8 */
+ if (req.method === "GET" && path === "/paid-content") {
       const result = await pool.query(`
         SELECT
           pc.id,
@@ -7244,699 +3117,7 @@ async function createTables() {
       );
 
       return;
-    }
-
-    // ------------------------------------------------------------
-    // HEALTH CHECK
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/health") {
-      try {
-        await pool.query("SELECT 1");
-
-        res.writeHead(200,{
-          "Content-Type":"application/json; charset=utf-8"
-        });
-
-        res.end(JSON.stringify({
-          ok:true,
-          service:"MySocial",
-          database:"connected",
-          time:new Date().toISOString()
-        }));
-
-      } catch (err) {
-        res.writeHead(503,{
-          "Content-Type":"application/json; charset=utf-8"
-        });
-
-        res.end(JSON.stringify(    // ============================================================
- // SECTION 9
- // SERVER STARTUP / DATABASE INITIALIZATION
- // ============================================================
-
-async function startServer() {
-  try {
-    console.log("Starting MySocial...");
-
-    await createTables();
-
-    console.log("Database initialized successfully.");
-
-    const server = http.createServer(async (req, res) => {
-      await handleRequest(req, res);
-    });
-
-    server.on("error", (err) => {
-      console.error("HTTP SERVER ERROR:", err);
-    });
-
-    server.listen(PORT, "0.0.0.0", () => {
-      console.log(
-        `MySocial server running on port ${PORT}`
-      );
-    });
-
-  } catch (err) {
-    console.error(
-      "FATAL STARTUP ERROR:",
-      err
-    );
-
-    process.exit(1);
-  }
-}
-
-process.on("unhandledRejection", (err) => {
-  console.error(
-    "UNHANDLED REJECTION:",
-    err
-  );
-});
-
-process.on("uncaughtException", (err) => {
-  console.error(
-    "UNCAUGHT EXCEPTION:",
-    err
-  );
-});
-
-process.on("SIGTERM", async () => {
-  console.log("SIGTERM received.");
-
-  try {
-    await pool.end();
-  } catch (err) {
-    console.error(
-      "DATABASE CLOSE ERROR:",
-      err
-    );
-  }
-
-  process.exit(0);
-});
-
-process.on("SIGINT", async () => {
-  console.log("SIGINT received.");
-
-  try {
-    await pool.end();
-  } catch (err) {
-    console.error(
-      "DATABASE CLOSE ERROR:",
-      err
-    );
-  }
-
-  process.exit(0);
-});
-
-startServer();   // ============================================================
-    // SECTION 10
-    // SECURITY / RATE LIMIT / SESSION CLEANUP / API
-    // ============================================================
-
-    // ------------------------------------------------------------
-    // SESSION CLEANUP
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "GET" &&
-      path === "/session-cleanup"
-    ) {
-      await pool.query(`
-        DELETE FROM sessions
-        WHERE expires_at < NOW()
-      `);
-
-      sendPage(
-        res,
-        "پاکسازی نشست‌ها",
-        `
-        <div class="card">
-          <h2>نشست‌های من</h2>
-
-          <p>
-            نشست‌های منقضی‌شده پاکسازی شدند.
-          </p>
-
-          <a href="/">بازگشت به خانه</a>
-        </div>
-        `
-      );
-
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // API CURRENT USER
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "GET" &&
-      path === "/api/me"
-    ) {
-      res.writeHead(200,{
-        "Content-Type":"application/json; charset=utf-8",
-        "Cache-Control":"no-store"
-      });
-
-      res.end(JSON.stringify({
-        ok:true,
-        user:{
-          id:user.id,
-          name:user.name,
-          email:user.email,
-          username:user.username || null
-        }
-      }));
-
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // API NOTIFICATIONS
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "GET" &&
-      path === "/api/notifications"
-    ) {
-      const result = await pool.query(`
-        SELECT
-          id,
-          type,
-          message,
-          is_read,
-          created_at
-        FROM notifications
-        WHERE user_id=$1
-        ORDER BY created_at DESC
-        LIMIT 50
-      `,[user.id]);
-
-      res.writeHead(200,{
-        "Content-Type":"application/json; charset=utf-8",
-        "Cache-Control":"no-store"
-      });
-
-      res.end(JSON.stringify({
-        ok:true,
-        notifications:result.rows
-      }));
-
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // MARK NOTIFICATIONS AS READ
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "POST" &&
-      path === "/api/notifications/read"
-    ) {
-      await pool.query(`
-        UPDATE notifications
-        SET is_read=TRUE
-        WHERE user_id=$1
-      `,[user.id]);
-
-      res.writeHead(200,{
-        "Content-Type":"application/json; charset=utf-8",
-        "Cache-Control":"no-store"
-      });
-
-      res.end(JSON.stringify({
-        ok:true
-      }));
-
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // API FEED
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "GET" &&
-      path === "/api/feed"
-    ) {
-      const result = await pool.query(`
-        SELECT
-          p.id,
-          p.user_id,
-          p.content,
-          p.image_url,
-          p.media_type,
-          p.location,
-          p.created_at,
-          u.name,
-          u.username,
-
-          (
-            SELECT COUNT(*)
-            FROM likes l
-            WHERE l.post_id=p.id
-          ) AS likes,
-
-          (
-            SELECT COUNT(*)
-            FROM comments c
-            WHERE c.post_id=p.id
-          ) AS comments,
-
-          EXISTS(
-            SELECT 1
-            FROM likes ml
-            WHERE
-              ml.post_id=p.id
-              AND ml.user_id=$1
-          ) AS liked,
-
-          EXISTS(
-            SELECT 1
-            FROM bookmarks bm
-            WHERE
-              bm.post_id=p.id
-              AND bm.user_id=$1
-          ) AS bookmarked
-
-        FROM posts p
-        JOIN users u
-          ON u.id=p.user_id
-
-        WHERE
-          p.archived=FALSE
-          AND NOT EXISTS(
-            SELECT 1
-            FROM blocked_users b
-            WHERE
-              (b.blocker_id=$1 AND b.blocked_id=p.user_id)
-              OR
-              (b.blocker_id=p.user_id AND b.blocked_id=$1)
-          )
-
-        ORDER BY p.created_at DESC
-        LIMIT 50
-      `,[user.id]);
-
-      res.writeHead(200,{
-        "Content-Type":"application/json; charset=utf-8",
-        "Cache-Control":"no-store"
-      });
-
-      res.end(JSON.stringify({
-        ok:true,
-        posts:result.rows
-      }));
-
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // API SEARCH
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "GET" &&
-      path === "/api/search"
-    ) {
-      const q =
-        (url.searchParams.get("q") || "").trim();
-
-      if (!q) {
-        res.writeHead(200,{
-          "Content-Type":"application/json; charset=utf-8"
-        });
-
-        res.end(JSON.stringify({
-          ok:true,
-          users:[],
-          posts:[]
-        }));
-
-        return;
-      }
-
-      const usersResult = await pool.query(`
-        SELECT
-          id,
-          name,
-          username,
-          bio
-        FROM users
-        WHERE
-          name ILIKE $1
-          OR username ILIKE $1
-        ORDER BY name
-        LIMIT 20
-      `,[`%${q}%`]);
-
-      const postsResult = await pool.query(`
-        SELECT
-          p.id,
-          p.user_id,
-          p.content,
-          p.image_url,
-          p.created_at,
-          u.name,
-          u.username
-        FROM posts p
-        JOIN users u
-          ON u.id=p.user_id
-        WHERE
-          p.archived=FALSE
-          AND p.content ILIKE $1
-        ORDER BY p.created_at DESC
-        LIMIT 20
-      `,[`%${q}%`]);
-
-      res.writeHead(200,{
-        "Content-Type":"application/json; charset=utf-8",
-        "Cache-Control":"no-store"
-      });
-
-      res.end(JSON.stringify({
-        ok:true,
-        users:usersResult.rows,
-        posts:postsResult.rows
-      }));
-
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // API UNREAD COUNT
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "GET" &&
-      path === "/api/unread-count"
-    ) {
-      const result = await pool.query(`
-        SELECT COUNT(*)::INTEGER AS count
-        FROM notifications
-        WHERE
-          user_id=$1
-          AND is_read=FALSE
-      `,[user.id]);
-
-      res.writeHead(200,{
-        "Content-Type":"application/json; charset=utf-8",
-        "Cache-Control":"no-store"
-      });
-
-      res.end(JSON.stringify({
-        ok:true,
-        count:result.rows[0].count
-      }));
-
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // SECURITY HEADERS
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "GET" &&
-      path === "/security-check"
-    ) {
-      res.writeHead(200,{
-        "Content-Type":"application/json; charset=utf-8",
-        "Cache-Control":"no-store",
-        "X-Content-Type-Options":"nosniff",
-        "X-Frame-Options":"SAMEORIGIN",
-        "Referrer-Policy":"strict-origin-when-cross-origin"
-      });
-
-      res.end(JSON.stringify({
-        ok:true,
-        security:[
-          "session-authentication",
-          "password-hashing",
-          "blocked-user-filtering",
-          "validated-ad-urls",
-          "database-parameterized-queries"
-        ]
-      }));
-
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // API SYSTEM STATUS
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "GET" &&
-      path === "/api/status"
-    ) {
-      let database = "offline";
-
-      try {
-        await pool.query("SELECT 1");
-        database = "online";
-      } catch (err) {
-        database = "offline";
-      }
-
-      res.writeHead(
-        database === "online" ? 200 : 503,
-        {
-          "Content-Type":
-            "application/json; charset=utf-8",
-          "Cache-Control":"no-store"
-        }
-      );
-
-      res.end(JSON.stringify({
-        ok:database === "online",
-        service:"MySocial",
-        database,
-        uptime:Math.floor(process.uptime()),
-        timestamp:new Date().toISOString()
-      }));
-
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // ROBOTS
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "GET" &&
-      path === "/robots.txt"
-    ) {
-      res.writeHead(200,{
-        "Content-Type":"text/plain; charset=utf-8"
-      });
-
-      res.end(
-        "User-agent: *\nAllow: /\n"
-      );
-
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // FAVICON
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "GET" &&
-      path === "/favicon.ico"
-    ) {
-      res.writeHead(204);
-      res.end();
-      return;
-                    }    // ============================================================
-    // SECTION 11
-    // ADMIN / REPORTS / MODERATION / SYSTEM MANAGEMENT
-    // ============================================================
-
-    if (
-      req.method === "GET" &&
-      path === "/reports"
-    ) {
-      const reports = await pool.query(`
-        SELECT
-          r.id,
-          r.reason,
-          r.description,
-          r.status,
-          r.created_at,
-          r.post_id,
-          r.reported_user_id,
-          u.name AS reporter_name
-        FROM reports r
-        JOIN users u
-          ON u.id=r.reporter_id
-        WHERE r.reporter_id=$1
-        ORDER BY r.created_at DESC
-        LIMIT 100
-      `,[user.id]);
-
-      sendPage(
-        res,
-        "گزارش‌های من",
-        `
-        <div class="card">
-          <h2>گزارش‌های من</h2>
-
-          ${
-            reports.rows.length
-              ? reports.rows.map(r => `
-                <div
-                  style="
-                    padding:12px 0;
-                    border-bottom:1px solid #eee;
-                  "
-                >
-                  <strong>
-                    گزارش #${r.id}
-                  </strong>
-
-                  <p>
-                    دلیل:
-                    ${escapeHtml(r.reason || "")}
-                  </p>
-
-                  <p>
-                    وضعیت:
-                    ${escapeHtml(r.status || "pending")}
-                  </p>
-
-                  ${
-                    r.description
-                      ? `
-                        <p>
-                          ${escapeHtml(r.description)}
-                        </p>
-                      `
-                      : ""
-                  }
-
-                  <small>
-                    ${new Date(r.created_at).toLocaleString("fa-IR")}
-                  </small>
-                </div>
-              `).join("")
-              : "<p>هنوز گزارشی ثبت نکرده‌اید.</p>"
-          }
-        </div>
-        `
-      );
-
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // DELETE MY SESSION
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "GET" &&
-      path === "/logout-all"
-    ) {
-      await pool.query(`
-        DELETE FROM sessions
-        WHERE user_id=$1
-      `,[user.id]);
-
-      res.writeHead(302,{
-        "Location":"/login",
-        "Set-Cookie":
-          "sessionId=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
-      });
-
-      res.end();
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // MY ACCOUNT DATA
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "GET" &&
-      path === "/account-data"
-    ) {
-      const [posts,followers,following,comments,likes] =
-        await Promise.all([
-          pool.query(`
-            SELECT COUNT(*)::INTEGER AS count
-            FROM posts
-            WHERE user_id=$1
-          `,[user.id]),
-
-          pool.query(`
-            SELECT COUNT(*)::INTEGER AS count
-            FROM follows
-            WHERE following_id=$1
-          `,[user.id]),
-
-          pool.query(`
-            SELECT COUNT(*)::INTEGER AS count
-            FROM follows
-            WHERE follower_id=$1
-          `,[user.id]),
-
-          pool.query(`
-            SELECT COUNT(*)::INTEGER AS count
-            FROM comments
-            WHERE user_id=$1
-          `,[user.id]),
-
-          pool.query(`
-            SELECT COUNT(*)::INTEGER AS count
-            FROM likes
-            WHERE user_id=$1
-          `,[user.id])
-        ]);
-
-      sendPage(
-        res,
-        "اطلاعات حساب",
-        `
-        <div class="card">
-          <h2>اطلاعات حساب من</h2>
-
-          <p>
-            نام:
-            <strong>${escapeHtml(user.name)}</strong>
-          </p>
-
-          <p>
-            ایمیل:
-            ${escapeHtml(user.email)}
-          </p>
-
-          <hr>
-
-          <p>
-            پست‌ها:
-            ${posts.rows[0].count}
-          </p>
-
-          <p>
-            دنبال‌کننده‌ها:
-            ${followers.rows[0].count}
-          </p>
-
-          <p>
-            دنبال‌شده‌ها:
-            ${following.rows[0].count}
-          </p>
-
-          <p>
-            نظرات:
-            ${comments.rows[0].count}
-          </p>
-
-          <p>
+    }       <p>
             پسندیده‌ها:
             ${likes.rows[0].count}
           </p>
@@ -8071,88 +3252,8 @@ startServer();   // ============================================================
       return;
     }
 
-    // ------------------------------------------------------------
-    // API HEALTH DETAIL
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "GET" &&
-      path === "/api/health/detail"
-    ) {
-      let database = false;
-
-      try {
-        await pool.query("SELECT NOW()");
-        database = true;
-      } catch (err) {
-        database = false;
-      }
-
-      let tables = {};
-
-      if (database) {
-        const tableNames = [
-          "users",
-          "posts",
-          "likes",
-          "comments",
-          "follows",
-          "messages",
-          "notifications",
-          "stories",
-          "reels",
-          "ads",
-          "payment_orders",
-          "wallet_accounts",
-          "live_streams"
-        ];
-
-        for (const tableName of tableNames) {
-          try {
-            const result = await pool.query(`
-              SELECT to_regclass($1) AS table_name
-            `,[
-              `public.${tableName}`
-            ]);
-
-            tables[tableName] =
-              Boolean(result.rows[0].table_name);
-
-          } catch (err) {
-            tables[tableName] = false;
-          }
-        }
-      }
-
-      res.writeHead(
-        database ? 200 : 503,
-        {
-          "Content-Type":
-            "application/json; charset=utf-8",
-          "Cache-Control":"no-store"
-        }
-      );
-
-      res.end(JSON.stringify({
-        ok:database,
-        service:"MySocial",
-        database,
-        tables,
-        uptime:Math.floor(process.uptime()),
-        timestamp:new Date().toISOString()
-      }));
-
-      return;
-            }   // ============================================================
-    // SECTION 12
-    // FINAL ROUTES / API / DATABASE SAFE OPERATIONS
-    // ============================================================
-
-    // ------------------------------------------------------------
-    // PUBLIC USER PROFILE API
-    // ------------------------------------------------------------
-
-    if (
+/* EXTRA FEATURE SECTION 12 */
+if (
       req.method === "GET" &&
       path === "/api/user"
     ) {
@@ -8903,49 +4004,8 @@ startServer();   // ============================================================
       return;
     }
 
-    // ------------------------------------------------------------
-    // API LOGOUT
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "POST" &&
-      path === "/api/logout"
-    ) {
-      const cookies =
-        parseCookies(req.headers.cookie || "");
-
-      const token =
-        cookies.sessionId;
-
-      if (token) {
-        await pool.query(`
-          DELETE FROM sessions
-          WHERE token=$1
-        `,[token]);
-      }
-
-      res.writeHead(200,{
-        "Content-Type":
-          "application/json; charset=utf-8",
-        "Set-Cookie":
-          "sessionId=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
-      });
-
-      res.end(JSON.stringify({
-        ok:true
-      }));
-
-      return;
-        }    // ============================================================
-    // SECTION 13
-    // NOTIFICATIONS / REPORTS / ACCOUNT MANAGEMENT
-    // ============================================================
-
-    // ------------------------------------------------------------
-    // NOTIFICATIONS PAGE
-    // ------------------------------------------------------------
-
-    if (
+/* EXTRA FEATURE SECTION 13 */
+if (
       req.method === "GET" &&
       path === "/notifications"
     ) {
@@ -9056,8 +4116,7 @@ startServer();   // ============================================================
       }
 
       redirect(res,"/notifications");
-      return;
-    }
+      return;      }
 
     // ------------------------------------------------------------
     // DELETE NOTIFICATION
@@ -9534,47 +4593,8 @@ startServer();   // ============================================================
       return;
     }
 
-    // ------------------------------------------------------------
-    // CLEAN OLD NOTIFICATIONS
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "GET" &&
-      path === "/cleanup-notifications"
-    ) {
-      const result = await pool.query(`
-        DELETE FROM notifications
-        WHERE
-          created_at < NOW() - INTERVAL '90 days'
-        RETURNING id
-      `);
-
-      sendPage(
-        res,
-        "پاکسازی اعلان‌ها",
-        `
-        <div class="container">
-          <div class="card">
-            پاکسازی انجام شد.
-            <br>
-            تعداد حذف‌شده:
-            <strong>${result.rowCount}</strong>
-          </div>
-        </div>
-        `
-      );
-
-      return;
-              }   // ============================================================
-    // SECTION 14
-    // GROUPS / CHANNELS / BUSINESS PAGES
-    // ============================================================
-
-    // ------------------------------------------------------------
-    // GROUPS LIST
-    // ------------------------------------------------------------
-
-    if (
+/* EXTRA FEATURE SECTION 14 */
+if (
       req.method === "GET" &&
       path === "/groups"
     ) {
@@ -10098,6 +5118,1010 @@ startServer();   // ============================================================
           )
         ORDER BY c.created_at DESC
         LIMIT 100
+      `,[user.id]);   }
+
+    // ------------------------------------------------------------
+    // DELETE NOTIFICATION
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "GET" &&
+      path === "/notification-delete"
+    ) {
+      const id =
+        Number(url.searchParams.get("id"));
+
+      if (
+        Number.isInteger(id) &&
+        id > 0
+      ) {
+        await pool.query(`
+          DELETE FROM notifications
+          WHERE
+            id=$1
+            AND user_id=$2
+        `,[id,user.id]);
+      }
+
+      redirect(res,"/notifications");
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // CLEAR ALL NOTIFICATIONS
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "GET" &&
+      path === "/notifications-clear"
+    ) {
+      await pool.query(`
+        DELETE FROM notifications
+        WHERE user_id=$1
+      `,[user.id]);
+
+      redirect(res,"/notifications");
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // REPORTS
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "GET" &&
+      path === "/reports"
+    ) {
+      const result = await pool.query(`
+        SELECT
+          r.id,
+          r.target_type,
+          r.target_id,
+          r.reason,
+          r.status,
+          r.created_at
+        FROM reports r
+        WHERE r.reporter_id=$1
+        ORDER BY r.created_at DESC
+        LIMIT 100
+      `,[user.id]);
+
+      sendPage(
+        res,
+        "گزارش‌های من",
+        `
+        <div class="container">
+          <h1>🚩 گزارش‌های من</h1>
+
+          ${
+            result.rows.map(r => `
+              <div class="card">
+                <strong>
+                  ${escapeHtml(r.target_type)}
+                </strong>
+
+                <p>
+                  شناسه:
+                  ${r.target_id}
+                </p>
+
+                <p>
+                  دلیل:
+                  ${escapeHtml(r.reason || "")}
+                </p>
+
+                <p>
+                  وضعیت:
+                  ${escapeHtml(r.status || "pending")}
+                </p>
+
+                <small class="muted">
+                  ${new Date(r.created_at).toLocaleString("fa-IR")}
+                </small>
+              </div>
+            `).join("") ||
+            `<div class="card">
+              گزارشی ثبت نشده است.
+            </div>`
+          }
+        </div>
+        `
+      );
+
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // REPORT API
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "POST" &&
+      path === "/api/report"
+    ) {
+      const d = await readBody(req);
+
+      const targetType =
+        (d.get("target_type") || "").trim();
+
+      const targetId =
+        Number(d.get("target_id"));
+
+      const reason =
+        (d.get("reason") || "").trim();
+
+      const allowedTypes = [
+        "user",
+        "post",
+        "comment",
+        "reel",
+        "story",
+        "live"
+      ];
+
+      if (
+        !allowedTypes.includes(targetType) ||
+        !Number.isInteger(targetId) ||
+        targetId <= 0 ||
+        !reason
+      ) {
+        res.writeHead(400,{
+          "Content-Type":
+            "application/json; charset=utf-8"
+        });
+
+        res.end(JSON.stringify({
+          ok:false,
+          error:"invalid_report"
+        }));
+
+        return;
+      }
+
+      await pool.query(`
+        INSERT INTO reports(
+          reporter_id,
+          target_type,
+          target_id,
+          reason,
+          status
+        )
+        VALUES(
+          $1,$2,$3,$4,'pending'
+        )
+      `,[
+        user.id,
+        targetType,
+        targetId,
+        reason.slice(0,1000)
+      ]);
+
+      res.writeHead(200,{
+        "Content-Type":
+          "application/json; charset=utf-8"
+      });
+
+      res.end(JSON.stringify({
+        ok:true
+      }));
+
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // ACCOUNT DATA
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "GET" &&
+      path === "/api/account"
+    ) {
+      const result = await pool.query(`
+        SELECT
+          id,
+          name,
+          username,
+          bio,
+          avatar_url,
+          created_at
+        FROM users
+        WHERE id=$1
+      `,[user.id]);
+
+      res.writeHead(200,{
+        "Content-Type":
+          "application/json; charset=utf-8",
+        "Cache-Control":"no-store"
+      });
+
+      res.end(JSON.stringify({
+        ok:true,
+        account:result.rows[0] || null
+      }));
+
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // REMOVE AVATAR
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "GET" &&
+      path === "/remove-avatar"
+    ) {
+      await pool.query(`
+        UPDATE users
+        SET avatar_url=NULL
+        WHERE id=$1
+      `,[user.id]);
+
+      redirect(res,"/profile");
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // CLEAR BIO
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "GET" &&
+      path === "/clear-bio"
+    ) {
+      await pool.query(`
+        UPDATE users
+        SET bio=''
+        WHERE id=$1
+      `,[user.id]);
+
+      redirect(res,"/profile-edit");
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // ACCOUNT DEACTIVATE
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "POST" &&
+      path === "/api/account/deactivate"
+    ) {
+      const d = await readBody(req);
+
+      const confirm =
+        (d.get("confirm") || "").trim();
+
+      if (confirm !== "DEACTIVATE") {
+        res.writeHead(400,{
+          "Content-Type":
+            "application/json; charset=utf-8"
+        });
+
+        res.end(JSON.stringify({
+          ok:false,
+          error:"confirmation_required"
+        }));
+
+        return;
+      }
+
+      await pool.query(`
+        UPDATE users
+        SET
+          username=NULL,
+          bio='',
+          avatar_url=NULL
+        WHERE id=$1
+      `,[user.id]);
+
+      await pool.query(`
+        DELETE FROM sessions
+        WHERE user_id=$1
+      `,[user.id]);
+
+      res.writeHead(200,{
+        "Content-Type":
+          "application/json; charset=utf-8",
+        "Set-Cookie":
+          "sessionId=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+      });
+
+      res.end(JSON.stringify({
+        ok:true,
+        deactivated:true
+      }));
+
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // USER BLOCK
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "POST" &&
+      path === "/api/block"
+    ) {
+      const d = await readBody(req);
+
+      const blockedId =
+        Number(d.get("user_id"));
+
+      if (
+        !Number.isInteger(blockedId) ||
+        blockedId <= 0 ||
+        blockedId === user.id
+      ) {
+        res.writeHead(400,{
+          "Content-Type":
+            "application/json; charset=utf-8"
+        });
+
+        res.end(JSON.stringify({
+          ok:false,
+          error:"invalid_user"
+        }));
+
+        return;
+      }
+
+      await pool.query(`
+        INSERT INTO blocked_users(
+          blocker_id,
+          blocked_id
+        )
+        VALUES($1,$2)
+        ON CONFLICT DO NOTHING
+      `,[user.id,blockedId]);
+
+      await pool.query(`
+        DELETE FROM follows
+        WHERE
+          (
+            follower_id=$1
+            AND following_id=$2
+          )
+          OR
+          (
+            follower_id=$2
+            AND following_id=$1
+          )
+      `,[user.id,blockedId]);
+
+      await pool.query(`
+        DELETE FROM follow_requests
+        WHERE
+          (
+            requester_id=$1
+            AND target_id=$2
+          )
+          OR
+          (
+            requester_id=$2
+            AND target_id=$1
+          )
+      `,[user.id,blockedId]);
+
+      res.writeHead(200,{
+        "Content-Type":
+          "application/json; charset=utf-8"
+      });
+
+      res.end(JSON.stringify({
+        ok:true,
+        blocked:true
+      }));
+
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // USER UNBLOCK
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "POST" &&
+      path === "/api/unblock"
+    ) {
+      const d = await readBody(req);
+
+      const blockedId =
+        Number(d.get("user_id"));
+
+      if (
+        !Number.isInteger(blockedId) ||
+        blockedId <= 0
+      ) {
+        res.writeHead(400,{
+          "Content-Type":
+            "application/json; charset=utf-8"
+        });
+
+        res.end(JSON.stringify({
+          ok:false,
+          error:"invalid_user"
+        }));
+
+        return;
+      }
+
+      await pool.query(`
+        DELETE FROM blocked_users
+        WHERE
+          blocker_id=$1
+          AND blocked_id=$2
+      `,[user.id,blockedId]);
+
+      res.writeHead(200,{
+        "Content-Type":
+          "application/json; charset=utf-8"
+      });
+
+      res.end(JSON.stringify({
+        ok:true,
+        blocked:false
+      }));
+
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // CLEAN EXPIRED STORIES
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "GET" &&
+      path === "/cleanup-stories"
+    ) {
+      const result = await pool.query(`
+        DELETE FROM stories
+        WHERE expires_at <= NOW()
+        RETURNING id
+      `);
+
+      sendPage(
+        res,
+        "پاکسازی استوری",
+        `
+        <div class="container">
+          <div class="card">
+            تعداد استوری‌های حذف‌شده:
+            <strong>${result.rowCount}</strong>
+          </div>
+        </div>
+        `
+      );
+
+      return;
+    }
+
+/* EXTRA FEATURE SECTION 14 */
+if (
+      req.method === "GET" &&
+      path === "/groups"
+    ) {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS groups (
+          id SERIAL PRIMARY KEY,
+          owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          name VARCHAR(120) NOT NULL,
+          description TEXT DEFAULT '',
+          avatar_url TEXT,
+          is_private BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS group_members (
+          id SERIAL PRIMARY KEY,
+          group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          role VARCHAR(20) NOT NULL DEFAULT 'member',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(group_id,user_id)
+        )
+      `);
+
+      const groups = await pool.query(`
+        SELECT
+          g.id,
+          g.name,
+          g.description,
+          g.avatar_url,
+          g.is_private,
+          g.created_at,
+          u.name AS owner_name,
+          (
+            SELECT COUNT(*)
+            FROM group_members gm
+            WHERE gm.group_id=g.id
+          ) AS members
+        FROM groups g
+        JOIN users u
+          ON u.id=g.owner_id
+        WHERE
+          g.is_private=FALSE
+          OR EXISTS(
+            SELECT 1
+            FROM group_members gm2
+            WHERE
+              gm2.group_id=g.id
+              AND gm2.user_id=$1
+          )
+        ORDER BY g.created_at DESC
+        LIMIT 100
+      `,[user.id]);
+
+      sendPage(
+        res,
+        "گروه‌ها",
+        `
+        <div class="container">
+
+          <h1>👥 گروه‌ها</h1>
+
+          <div class="card">
+            <form method="POST" action="/group-create">
+
+              <input
+                name="name"
+                placeholder="نام گروه"
+                maxlength="120"
+                required
+              >
+
+              <textarea
+                name="description"
+                placeholder="توضیحات گروه"
+                maxlength="1000"
+              ></textarea>
+
+              <label>
+                <input
+                  type="checkbox"
+                  name="is_private"
+                  value="1"
+                >
+                گروه خصوصی
+              </label>
+
+              <button type="submit">
+                ایجاد گروه
+              </button>
+
+            </form>
+          </div>
+
+          ${
+            groups.rows.map(g => `
+              <div class="card">
+
+                <h3>
+                  <a href="/group?id=${g.id}">
+                    ${escapeHtml(g.name)}
+                  </a>
+                </h3>
+
+                <p>
+                  ${escapeHtml(g.description || "")}
+                </p>
+
+                <small class="muted">
+                  ${g.members} عضو
+                  • سازنده:
+                  ${escapeHtml(g.owner_name)}
+                </small>
+
+              </div>
+            `).join("")
+          }
+
+        </div>
+        `
+      );
+
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // CREATE GROUP
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "POST" &&
+      path === "/group-create"
+    ) {
+      const d = await readBody(req);
+
+      const name =
+        (d.get("name") || "").trim();
+
+      const description =
+        (d.get("description") || "").trim();
+
+      const isPrivate =
+        d.get("is_private") === "1";
+
+      if (!name) {
+        redirect(res,"/groups");
+        return;
+      }
+
+      const group = await pool.query(`
+        INSERT INTO groups(
+          owner_id,
+          name,
+          description,
+          is_private
+        )
+        VALUES($1,$2,$3,$4)
+        RETURNING id
+      `,[
+        user.id,
+        name.slice(0,120),
+        description.slice(0,1000),
+        isPrivate
+      ]);
+
+      await pool.query(`
+        INSERT INTO group_members(
+          group_id,
+          user_id,
+          role
+        )
+        VALUES($1,$2,'owner')
+        ON CONFLICT DO NOTHING
+      `,[
+        group.rows[0].id,
+        user.id
+      ]);
+
+      redirect(
+        res,
+        `/group?id=${group.rows[0].id}`
+      );
+
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // GROUP PAGE
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "GET" &&
+      path === "/group"
+    ) {
+      const groupId =
+        Number(url.searchParams.get("id"));
+
+      if (
+        !Number.isInteger(groupId) ||
+        groupId <= 0
+      ) {
+        redirect(res,"/groups");
+        return;
+      }
+
+      const group = await pool.query(`
+        SELECT
+          g.*,
+          u.name AS owner_name
+        FROM groups g
+        JOIN users u
+          ON u.id=g.owner_id
+        WHERE g.id=$1
+      `,[groupId]);
+
+      if (!group.rows.length) {
+        redirect(res,"/groups");
+        return;
+      }
+
+      const g = group.rows[0];
+
+      const membership = await pool.query(`
+        SELECT role
+        FROM group_members
+        WHERE
+          group_id=$1
+          AND user_id=$2
+        LIMIT 1
+      `,[groupId,user.id]);
+
+      if (
+        g.is_private &&
+        !membership.rows.length
+      ) {
+        sendPage(
+          res,
+          "گروه خصوصی",
+          `
+          <div class="container">
+            <div class="card">
+              <h2>🔒 گروه خصوصی</h2>
+              <p>
+                برای مشاهده این گروه باید عضو آن باشید.
+              </p>
+            </div>
+          </div>
+          `
+        );
+
+        return;
+      }
+
+      const members = await pool.query(`
+        SELECT
+          u.id,
+          u.name,
+          u.username,
+          u.avatar_url,
+          gm.role
+        FROM group_members gm
+        JOIN users u
+          ON u.id=gm.user_id
+        WHERE gm.group_id=$1
+        ORDER BY gm.created_at ASC
+        LIMIT 200
+      `,[groupId]);
+
+      sendPage(
+        res,
+        g.name,
+        `
+        <div class="container">
+
+          <div class="card">
+
+            <h1>
+              👥 ${escapeHtml(g.name)}
+            </h1>
+
+            <p>
+              ${escapeHtml(g.description || "")}
+            </p>
+
+            <small class="muted">
+              سازنده:
+              ${escapeHtml(g.owner_name)}
+            </small>
+
+            <div style="margin-top:15px">
+
+              ${
+                membership.rows.length
+                  ? `
+                    <a
+                      class="button"
+                      href="/group-leave?id=${g.id}"
+                    >
+                      ترک گروه
+                    </a>
+                  `
+                  : `
+                    <a
+                      class="button"
+                      href="/group-join?id=${g.id}"
+                    >
+                      عضویت در گروه
+                    </a>
+                  `
+              }
+
+            </div>
+
+          </div>
+
+          <div class="card">
+
+            <h2>اعضا</h2>
+
+            ${
+              members.rows.map(m => `
+                <div
+                  style="
+                    display:flex;
+                    align-items:center;
+                    gap:10px;
+                    padding:8px 0;
+                  "
+                >
+
+                  ${
+                    m.avatar_url
+                      ? `
+                        <img
+                          src="${safeUrl(m.avatar_url)}"
+                          style="
+                            width:42px;
+                            height:42px;
+                            border-radius:50%;
+                            object-fit:cover;
+                          "
+                        >
+                      `
+                      : `<div class="avatar">👤</div>`
+                  }
+
+                  <div>
+                    <strong>
+                      ${escapeHtml(m.name)}
+                    </strong>
+
+                    ${
+                      m.username
+                        ? `
+                          <div class="muted">
+                            @${escapeHtml(m.username)}
+                          </div>
+                        `
+                        : ""
+                    }
+
+                    <small class="muted">
+                      ${escapeHtml(m.role)}
+                    </small>
+                  </div>
+
+                </div>
+              `).join("")
+            }
+
+          </div>
+
+        </div>
+        `
+      );
+
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // JOIN GROUP
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "GET" &&
+      path === "/group-join"
+    ) {
+      const groupId =
+        Number(url.searchParams.get("id"));
+
+      if (
+        Number.isInteger(groupId) &&
+        groupId > 0
+      ) {
+        const group = await pool.query(`
+          SELECT
+            id,
+            is_private
+          FROM groups
+          WHERE id=$1
+        `,[groupId]);
+
+        if (
+          group.rows.length &&
+          !group.rows[0].is_private
+        ) {
+          await pool.query(`
+            INSERT INTO group_members(
+              group_id,
+              user_id,
+              role
+            )
+            VALUES($1,$2,'member')
+            ON CONFLICT DO NOTHING
+          `,[groupId,user.id]);
+        }
+      }
+
+      redirect(
+        res,
+        `/group?id=${groupId}`
+      );
+
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // LEAVE GROUP
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "GET" &&
+      path === "/group-leave"
+    ) {
+      const groupId =
+        Number(url.searchParams.get("id"));
+
+      if (
+        Number.isInteger(groupId) &&
+        groupId > 0
+      ) {
+        const owner = await pool.query(`
+          SELECT owner_id
+          FROM groups
+          WHERE id=$1
+        `,[groupId]);
+
+        if (
+          owner.rows.length &&
+          owner.rows[0].owner_id !== user.id
+        ) {
+          await pool.query(`
+            DELETE FROM group_members
+            WHERE
+              group_id=$1
+              AND user_id=$2
+          `,[groupId,user.id]);
+        }
+      }
+
+      redirect(res,"/groups");
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // CHANNELS
+    // ------------------------------------------------------------
+
+    if (
+      req.method === "GET" &&
+      path === "/channels"
+    ) {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS channels (
+          id SERIAL PRIMARY KEY,
+          owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          name VARCHAR(120) NOT NULL,
+          username VARCHAR(80) UNIQUE,
+          description TEXT DEFAULT '',
+          avatar_url TEXT,
+          is_private BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS channel_members (
+          id SERIAL PRIMARY KEY,
+          channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          role VARCHAR(20) NOT NULL DEFAULT 'subscriber',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(channel_id,user_id)
+        )
+      `);
+
+      const channels = await pool.query(`
+        SELECT
+          c.id,
+          c.name,
+          c.username,
+          c.description,
+          c.avatar_url,
+          c.created_at,
+          (
+            SELECT COUNT(*)
+            FROM channel_members cm
+            WHERE cm.channel_id=c.id
+          ) AS members
+        FROM channels c
+        WHERE
+          c.is_private=FALSE
+          OR EXISTS(
+            SELECT 1
+            FROM channel_members cm2
+            WHERE
+              cm2.channel_id=c.id
+              AND cm2.user_id=$1
+          )
+        ORDER BY c.created_at DESC
+        LIMIT 100
+      `,[user.id]);     ORDER BY c.created_at DESC
+        LIMIT 100
       `,[user.id]);
 
       sendPage(
@@ -10426,43 +6450,7 @@ startServer();   // ============================================================
       return;
     }
 
-    // ------------------------------------------------------------
-    // LEAVE CHANNEL
-    // ------------------------------------------------------------
-
-    if (
-      req.method === "GET" &&
-      path === "/channel-leave"
-    ) {
-      const channelId =
-        Number(url.searchParams.get("id"));
-
-      if (
-        Number.isInteger(channelId) &&
-        channelId > 0
-      ) {
-        const owner = await pool.query(`
-          SELECT owner_id
-          FROM channels
-          WHERE id=$1
-        `,[channelId]);
-
-        if (
-          owner.rows.length &&
-          owner.rows[0].owner_id !== user.id
-        ) {
-          await p// ============================================================
-// SECTION 15
-// GROUPS / CHANNELS / BUSINESS MANAGEMENT
-// POLLS / EVENTS / BADGES / REWARDS
-// CALL SIGNALING
-// ============================================================
-
-
-// ------------------------------------------------------------
-// GROUP EDIT
-// ------------------------------------------------------------
-
+/* EXTRA FEATURE SECTION 15 */
 if (req.method === "POST" && path === "/group-edit") {
 
   const d = await readBody(req);
@@ -11131,8 +7119,1021 @@ if (req.method === "POST" && path === "/poll-create") {
 
   const poll = await pool.query(`
     INSERT INTO polls(
+      user_id, if (
+  req.method === "GET" &&
+  path === "/api/event"
+) {
+
+  const eventId = Number(
+    url.searchParams.get("id")
+  );
+
+  if (
+    !Number.isInteger(eventId) ||
+    eventId <= 0
+  ) {
+    sendJson(res,{
+      ok:false,
+      error:"invalid_event"
+    },400);
+    return;
+  }
+
+  const event = await pool.query(`
+    SELECT
+      e.id,
+      e.title,
+      e.description,
+      e.event_date,
+      e.location,
+      e.user_id,
+      u.name AS creator_name,
+      COUNT(ea.id)::INTEGER AS attendees
+    FROM events e
+    JOIN users u
+      ON u.id=e.user_id
+    LEFT JOIN event_attendees ea
+      ON ea.event_id=e.id
+    WHERE e.id=$1
+    GROUP BY
+      e.id,
+      u.name
+    LIMIT 1
+  `,[eventId]);
+
+  if (!event.rows.length) {
+    sendJson(res,{
+      ok:false,
+      error:"not_found"
+    },404);
+    return;
+  }
+
+  const attendee = await pool.query(`
+    SELECT status
+    FROM event_attendees
+    WHERE event_id=$1
+      AND user_id=$2
+    LIMIT 1
+  `,[
+    eventId,
+    user.id
+  ]);
+
+  sendJson(res,{
+    ok:true,
+    event:event.rows[0],
+    attending:!!attendee.rows.length,
+    status:attendee.rows[0]?.status || null
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// DELETE EVENT
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/event-delete"
+) {
+
+  const eventId = Number(
+    url.searchParams.get("id")
+  );
+
+  if (
+    Number.isInteger(eventId) &&
+    eventId > 0
+  ) {
+
+    await pool.query(`
+      DELETE FROM events
+      WHERE id=$1
+        AND user_id=$2
+    `,[
+      eventId,
+      user.id
+    ]);
+  }
+
+  redirect(res,"/");
+  return;
+}
+
+
+// ------------------------------------------------------------
+// UPDATE EVENT
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/event-edit"
+) {
+
+  const d = await readBody(req);
+
+  const eventId =
+    Number(d.get("event_id"));
+
+  const title =
+    (d.get("title") || "").trim();
+
+  const description =
+    (d.get("description") || "").trim();
+
+  const dateText =
+    (d.get("event_date") || "").trim();
+
+  const location =
+    (d.get("location") || "").trim();
+
+  const eventDate =
+    new Date(dateText);
+
+  if (
+    !Number.isInteger(eventId) ||
+    eventId <= 0 ||
+    !title ||
+    !dateText ||
+    Number.isNaN(eventDate.getTime())
+  ) {
+    redirect(res,"/");
+    return;
+  }
+
+  await pool.query(`
+    UPDATE events
+    SET
+      title=$1,
+      description=$2,
+      event_date=$3,
+      location=$4
+    WHERE id=$5
+      AND user_id=$6
+  `,[
+    title.slice(0,200),
+    description.slice(0,3000),
+    eventDate,
+    location.slice(0,300),
+    eventId,
+    user.id
+  ]);
+
+  redirect(res,"/");
+  return;
+}
+
+
+// ------------------------------------------------------------
+// EVENT ATTENDEES API
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/api/event/attendees"
+) {
+
+  const eventId = Number(
+    url.searchParams.get("event_id")
+  );
+
+  if (
+    !Number.isInteger(eventId) ||
+    eventId <= 0
+  ) {
+    sendJson(res,{
+      ok:false,
+      error:"invalid_event"
+    },400);
+    return;
+  }
+
+  const attendees = await pool.query(`
+    SELECT
+      u.id,
+      u.name,
+      u.username,
+      ea.status,
+      ea.created_at
+    FROM event_attendees ea
+    JOIN users u
+      ON u.id=ea.user_id
+    WHERE ea.event_id=$1
+    ORDER BY ea.created_at ASC
+    LIMIT 500
+  `,[eventId]);
+
+  sendJson(res,{
+    ok:true,
+    attendees:attendees.rows
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// EVENT STATUS
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/api/event/status"
+) {
+
+  const d = await readBody(req);
+
+  const eventId =
+    Number(d.get("event_id"));
+
+  const status =
+    (d.get("status") || "").trim();
+
+  const allowedStatus = [
+    "going",
+    "interested",
+    "not_going"
+  ];
+
+  if (
+    !Number.isInteger(eventId) ||
+    eventId <= 0 ||
+    !allowedStatus.includes(status)
+  ) {
+    sendJson(res,{
+      ok:false,
+      error:"invalid_data"
+    },400);
+    return;
+  }
+
+  const event = await pool.query(`
+    SELECT id
+    FROM events
+    WHERE id=$1
+    LIMIT 1
+  `,[eventId]);
+
+  if (!event.rows.length) {
+    sendJson(res,{
+      ok:false,
+      error:"event_not_found"
+    },404);
+    return;
+  }
+
+  await pool.query(`
+    INSERT INTO event_attendees(
+      event_id,
       user_id,
-      question,
+      status
+    )
+    VALUES($1,$2,$3)
+    ON CONFLICT(event_id,user_id)
+    DO UPDATE
+    SET status=EXCLUDED.status
+  `,[
+    eventId,
+    user.id,
+    status
+  ]);
+
+  sendJson(res,{
+    ok:true,
+    status
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// EVENT CANCEL ATTENDANCE
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/api/event/leave"
+) {
+
+  const eventId = Number(
+    url.searchParams.get("id")
+  );
+
+  if (
+    !Number.isInteger(eventId) ||
+    eventId <= 0
+  ) {
+    sendJson(res,{
+      ok:false,
+      error:"invalid_event"
+    },400);
+    return;
+  }
+
+  await pool.query(`
+    DELETE FROM event_attendees
+    WHERE event_id=$1
+      AND user_id=$2
+  `,[
+    eventId,
+    user.id
+  ]);
+
+  sendJson(res,{
+    ok:true
+  });
+
+  return;
+}
+
+
+/* EXTRA FEATURE SECTION 17 */
+
+
+// ------------------------------------------------------------
+// REWARDS
+// ------------------------------------------------------------
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS rewards (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    points INTEGER NOT NULL DEFAULT 0,
+    level INTEGER NOT NULL DEFAULT 1,
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(user_id)
+  )
+`);
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS reward_transactions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    points INTEGER NOT NULL,
+    reason VARCHAR(200),
+    created_at TIMESTAMP DEFAULT NOW()
+  )
+`);
+
+
+// ------------------------------------------------------------
+// ENSURE USER REWARD
+// ------------------------------------------------------------
+
+await pool.query(`
+  INSERT INTO rewards(
+    user_id,
+    points,
+    level
+  )
+  VALUES($1,0,1)
+  ON CONFLICT(user_id)
+  DO NOTHING
+`,[
+  user.id
+]);
+
+
+// ------------------------------------------------------------
+// ADD REWARD POINTS
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/api/reward/add"
+) {
+
+  const d = await readBody(req);
+
+  const points =
+    Number(d.get("points"));
+
+  const reason =
+    (d.get("reason") || "").trim();
+
+  if (
+    !Number.isInteger(points) ||
+    points <= 0 ||
+    points > 10000
+  ) {
+    sendJson(res,{
+      ok:false,
+      error:"invalid_points"
+    },400);
+    return;
+  }
+
+  await pool.query("BEGIN");
+
+  try {
+
+    await pool.query(`
+      INSERT INTO rewards(
+        user_id,
+        points,
+        level
+      )
+      VALUES($1,$2,1)
+      ON CONFLICT(user_id)
+      DO UPDATE
+      SET
+        points=rewards.points+$2,
+        level=GREATEST(
+          1,
+          FLOOR((rewards.points+$2)/1000)+1
+        ),
+        updated_at=NOW()
+    `,[
+      user.id,
+      points
+    ]);
+
+    await pool.query(`
+      INSERT INTO reward_transactions(
+        user_id,
+        points,
+        reason
+      )
+      VALUES($1,$2,$3)
+    `,[
+      user.id,
+      points,
+      reason.slice(0,200)
+    ]);
+
+    await pool.query("COMMIT");
+
+    sendJson(res,{
+      ok:true,
+      points
+    });
+
+  } catch (err) {
+
+    await pool.query("ROLLBACK");
+
+    console.error(
+      "REWARD ERROR:",
+      err
+    );
+
+    sendJson(res,{
+      ok:false,
+      error:"server_error"
+    },500);
+  }
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// REWARD PROFILE
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/api/rewards"
+) {
+
+  const reward = await pool.query(`
+    SELECT
+      points,
+      level,
+      updated_at
+    FROM rewards
+    WHERE user_id=$1
+    LIMIT 1
+  `,[user.id]);
+
+  const transactions = await pool.query(`
+    SELECT
+      points,
+      reason,
+      created_at
+    FROM reward_transactions
+    WHERE user_id=$1
+    ORDER BY created_at DESC
+    LIMIT 100
+  `,[user.id]);
+
+  sendJson(res,{
+    ok:true,
+    reward:reward.rows[0] || {
+      points:0,
+      level:1
+    },
+    transactions:transactions.rows
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// BADGES
+// ------------------------------------------------------------
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS badges (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    description TEXT,
+    icon VARCHAR(20),
+    requirement INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW()
+  )
+`);
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS user_badges (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    badge_id INTEGER NOT NULL REFERENCES badges(id) ON DELETE CASCADE,
+    awarded_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(user_id,badge_id)
+  )
+`);
+
+await pool.query(`
+  INSERT INTO badges(
+    name,
+    description,
+    icon,
+    requirement
+  )
+  VALUES
+    ('عضو فعال','فعالیت مستمر در MySocial','⭐',100),
+    ('سازنده محتوا','انتشار محتوای زیاد','🏆',500),
+    ('محبوب','دریافت تعامل بالا','❤️',1000)
+  ON CONFLICT(name)
+  DO NOTHING
+`);
+
+
+// ------------------------------------------------------------
+// BADGES API
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/api/badges"
+) {
+
+  const badges = await pool.query(`
+    SELECT
+      b.id,
+      b.name,
+      b.description,
+      b.icon,
+      b.requirement,
+      ub.awarded_at
+    FROM badges b
+    LEFT JOIN user_badges ub
+      ON ub.badge_id=b.id
+      AND ub.user_id=$1
+    ORDER BY b.requirement ASC
+  `,[user.id]);
+
+  sendJson(res,{
+    ok:true,
+    badges:badges.rows
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// AUTO AWARD BADGES
+// ------------------------------------------------------------
+
+const rewardForBadge = await pool.query(`
+  SELECT points
+  FROM rewards
+  WHERE user_id=$1
+  LIMIT 1
+`,[
+  user.id
+]);
+
+const currentPoints =
+  Number(
+    rewardForBadge.rows[0]?.points || 0
+  );
+
+if (currentPoints > 0) {
+
+  const eligibleBadges = await pool.query(`
+    SELECT id
+    FROM badges
+    WHERE requirement <= $1
+  `,[
+    currentPoints
+  ]);
+
+  for (
+    const badge of eligibleBadges.rows
+  ) {
+
+    await pool.query(`
+      INSERT INTO user_badges(
+        user_id,
+        badge_id
+      )
+      VALUES($1,$2)
+      ON CONFLICT(user_id,badge_id)
+      DO NOTHING
+    `,[
+      user.id,
+      badge.id
+    ]);
+  }
+}
+
+
+// ------------------------------------------------------------
+// USER BADGES
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/api/user/badges"
+) {
+
+  const badges = await pool.query(`
+    SELECT
+      b.id,
+      b.name,
+      b.description,
+      b.icon,
+      ub.awarded_at
+    FROM user_badges ub
+    JOIN badges b
+      ON b.id=ub.badge_id
+    WHERE ub.user_id=$1
+    ORDER BY ub.awarded_at DESC
+  `,[
+    user.id
+  ]);
+
+  sendJson(res,{
+    ok:true,
+    badges:badges.rows
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// REWARDS PAGE
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/rewards"
+) {
+
+  const reward = await pool.query(`
+    SELECT
+      points,
+      level
+    FROM rewards
+    WHERE user_id=$1
+    LIMIT 1
+  `,[
+    user.id
+  ]);
+
+  const badges = await pool.query(`
+    SELECT
+      b.name,
+      b.description,
+      b.icon,
+      ub.awarded_at
+    FROM user_badges ub
+    JOIN badges b
+      ON b.id=ub.badge_id
+    WHERE ub.user_id=$1
+    ORDER BY ub.awarded_at DESC
+  `,[
+    user.id
+  ]);
+
+  sendPage(
+    res,
+    "جوایز",
+    `
+      <div class="container">
+
+        <div class="card">
+
+          <h1>🏆 جوایز من</h1>
+
+          <p>
+            امتیاز:
+            <strong>
+              ${reward.rows[0]?.points || 0}
+            </strong>
+          </p>
+
+          <p>
+            سطح:
+            <strong>
+              ${reward.rows[0]?.level || 1}
+            </strong>
+          </p>
+
+        </div>
+
+        <div class="card">
+
+          <h2>🎖 نشان‌ها</h2>
+
+          ${
+            badges.rows.length
+              ? badges.rows.map(b => `
+                <div class="card">
+
+                  <strong>
+                    ${escapeHtml(b.icon || "🏅")}
+                    ${escapeHtml(b.name)}
+                  </strong>
+
+                  <p>
+                    ${escapeHtml(
+                      b.description || ""
+                    )}
+                  </p>
+
+                </div>
+              `).join("")
+              : `
+                <p class="muted">
+                  هنوز نشانی دریافت نکرده‌اید.
+                </p>
+              `
+          }
+
+        </div>
+
+      </div>
+    `
+  );
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// SHOP PRODUCTS
+// ------------------------------------------------------------
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS products (
+    id SERIAL PRIMARY KEY,
+    seller_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(200) NOT NULL,
+    description TEXT,
+    price BIGINT NOT NULL DEFAULT 0,
+    currency VARCHAR(10) DEFAULT 'IRT',
+    image_url TEXT,
+    stock INTEGER NOT NULL DEFAULT 0,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW()
+  )
+`);
+
+await pool.query(`
+  CREATE INDEX IF NOT EXISTS idx_products_seller
+  ON products(seller_id,created_at DESC)
+`);
+
+
+// ------------------------------------------------------------
+// CREATE PRODUCT
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/product-create"
+) {
+
+  const d = await readBody(req);
+
+  const name =
+    (d.get("name") || "").trim();
+
+  const description =
+    (d.get("description") || "").trim();
+
+  const price =
+    Number(d.get("price"));
+
+  const stock =
+    Number(d.get("stock"));
+
+  const imageUrl =
+    (d.get("image_url") || "").trim();
+
+  if (
+    !name ||
+    !Number.isInteger(price) ||
+    price < 0 ||
+    !Number.isInteger(stock) ||
+    stock < 0
+  ) {
+    redirect(res,"/shop");
+    return;
+  }
+
+  let safeImageUrl = "";
+
+  if (imageUrl) {
+    try {
+
+      const parsed =
+        new URL(imageUrl);
+
+      if (
+        parsed.protocol === "http:" ||
+        parsed.protocol === "https:"
+      ) {
+        safeImageUrl =
+          parsed.toString();
+      }
+
+    } catch {}
+  }
+
+  await pool.query(`
+    INSERT INTO products(
+      seller_id,
+      name,
+      description,
+      price,
+      currency,
+      image_url,
+      stock
+    )
+    VALUES(
+      $1,$2,$3,$4,'IRT',$5,$6
+    )
+  `,[
+    user.id,
+    name.slice(0,200),
+    description.slice(0,3000),
+    price,
+    safeImageUrl,
+    stock
+  ]);
+
+  redirect(res,"/shop");
+  return;
+}
+
+
+// ------------------------------------------------------------
+// SHOP
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/shop"
+) {
+
+  const products = await pool.query(`
+    SELECT
+      p.*,
+      u.name AS seller_name
+    FROM products p
+    JOIN users u
+      ON u.id=p.seller_id
+    WHERE p.active=TRUE
+    ORDER BY p.created_at DESC
+    LIMIT 100
+  `);
+
+  sendPage(
+    res,
+    "فروشگاه",
+    `
+      <div class="container">
+
+        <h1>🛍 فروشگاه</h1>
+
+        <div class="card">
+
+          <h2>افزودن محصول</h2>
+
+          <form
+            method="POST"
+            action="/product-create"
+          >
+
+            <input
+              name="name"
+              placeholder="نام محصول"
+              maxlength="200"
+              required
+            >
+
+            <textarea
+              name="description"
+              placeholder="توضیحات محصول"
+              maxlength="3000"
+            ></textarea>
+
+            <input
+              name="price"
+              type="number"
+              min="0"
+              placeholder="قیمت"
+              required
+            >
+
+            <input
+              name="stock"
+              type="number"
+              min="0"
+              placeholder="موجودی"
+              required
+            >
+
+            <input
+              name="image_url"
+              placeholder="لینک تصویر"
+            >
+
+            <button type="submit">
+              افزودن محصول
+            </button>
+
+          </form>
+
+        </div>
+
+        ${
+          products.rows.map(p => `
+            <div class="card">
+
+              ${
+                p.image_url
+                  ? `
+                    <img
+                      src="${safeUrl(p.image_url)}"
+                      alt=""
+                      style="
+                        max-width:100%;
+                        border-radius:12px;
+                      "
+                    >
+                  `
+                  : ""
+              }
+
+              <h3>
+                ${escapeHtml(p.name)}
+              </h3>
+
+              <p>
+                ${escapeHtml(
+                  p.description || ""
+                )}
+              </p>
+
+              <strong>
+                ${Number(p.price).toLocaleString("fa-IR")}
+                تومان
+              </strong>
+
+              <p class="muted">
+                فروشنده:
+                ${escapeHtml(
+                  p.seller_name || ""
+                )}
+              </p>
+
+              <p>
+                موجودی:
+                ${p.stock}
+              </p>
+
+            </div>
+          `).join("")
+        }
+
+      </div>
+    `
+  );
+
+  return;
+}      question,
       expires_at
     )
     VALUES(
@@ -11456,51 +8457,7 @@ if (req.method === "GET" && path === "/event-attend") {
   return;
 }
 
-
-// ------------------------------------------------------------
-// BADGES
-// ------------------------------------------------------------
-
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS badges (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL UNIQUE,
-    description TEXT,
-    icon_url TEXT,
-    created_at TIMESTAMP DEFAULT NOW()
-  )
-`);
-
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS user_badges (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    badge_id INTEGER NOT NULL REFERENCES badges(id) ON DELETE CASCADE,
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(user_id,badge_id)
-  )
-`);
-
-
-// ------------------------------------------------------------
-// SEED DEFAULT BADGES
-// ------------------------------------------------------------
-
-const badgeSeed = [
-  [
-    "عضو قدیمی",
-    "برای  // ============================================================
-// SECTION 16
-// GROUPS / CHANNELS / BUSINESS ADVANCED FEATURES
-// MODERATION / MEMBERS / ADMIN CONTROLS
-// EVENTS / POLLS / REWARDS APIs
-// ============================================================
-
-
-// ------------------------------------------------------------
-// GROUP MEMBERS API
-// ------------------------------------------------------------
-
+/* EXTRA FEATURE SECTION 16 */
 if (
   req.method === "GET" &&
   path === "/api/group/members"
@@ -11588,7 +8545,6 @@ if (
   ]);
 
   if (!owner.rows.length) {
-
     sendJson(res,{
       ok:false,
       error:"not_allowed"
@@ -11659,7 +8615,6 @@ if (
   ]);
 
   if (!owner.rows.length) {
-
     sendJson(res,{
       ok:false,
       error:"not_allowed"
@@ -11784,7 +8739,6 @@ if (
   ]);
 
   if (!owner.rows.length) {
-
     sendJson(res,{
       ok:false,
       error:"not_allowed"
@@ -11855,7 +8809,6 @@ if (
   ]);
 
   if (!owner.rows.length) {
-
     sendJson(res,{
       ok:false,
       error:"not_allowed"
@@ -12175,1016 +9128,7 @@ if (
 if (
   req.method === "GET" &&
   path === "/api/event"
-) {
-
-  const eventId = Number(
-    url.searchParams.get("id")
-  );
-
-  if (
-    !Number.isInteger(eventId) ||
-    eventId <= 0
-  ) {
-
-    sendJson(res,{
-      ok:false,
-      error:"invalid_event"
-    },400);
-
-    return;
-  }
-
-  const event = await pool.query(`
-    SELECT
-      e.id,
-      e.title,
-      e.description,
-      e.event_date,
-      e.location,
-      e.user_id,
-      u.name AS creator_name
-    FROM events e
-    JOIN users u
-      ON u.id=e.user_id
-    WHERE e.id=$1
-    LIMIT 1
-  `,[eventId]);
-
-  if (!event.rows.length) {
-
-    sendJson(res,{
-      ok:false,
-      error:"not_found"
-    },404);
-
-    return;
-  }
-
-  const attendees = await pool.query(`
-    SELECT
-      u.id,
-      u.name,
-      u.username,
-      ea.status
-    FROM event_attendees ea
-    JOIN users u
-      ON u.id=ea.user_id
-    WHERE ea.event_id=$1
-    ORDER BY ea.created_at ASC
-  `,[eventId]);
-
-  sendJson(res,{
-    ok:true,
-    event:event.rows[0],
-    attendees:attendees.rows
-  });
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// POLL LIST API
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/api/polls"
-) {
-
-  const rows = await pool.query(`
-    SELECT
-      p.id,
-      p.question,
-      p.expires_at,
-      p.created_at,
-      u.id AS user_id,
-      u.name AS user_name,
-      COALESCE(
-        JSON_AGG(
-          JSON_BUILD_OBJECT(
-            'id',po.id,
-            'text',po.option_text,
-            'votes',po.votes
-          )
-          ORDER BY po.id
-        ),
-        '[]'::json
-      ) AS options
-    FROM polls p
-    JOIN users u
-      ON u.id=p.user_id
-    LEFT JOIN poll_options po
-      ON po.poll_id=p.id
-    WHERE
-      p.expires_at IS NULL
-      OR p.expires_at > NOW()
-    GROUP BY
-      p.id,
-      u.id
-    ORDER BY p.created_at DESC
-    LIMIT 100
-  `);
-
-  sendJson(res,{
-    ok:true,
-    polls:rows.rows
-  });
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// REWARD POINTS API
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/api/rewards"
-) {
-
-  const points = await pool.query(`
-    SELECT points
-    FROM user_points
-    WHERE user_id=$1
-  `,[user.id]);
-
-  const rewards = await pool.query(`
-    SELECT
-      r.id,
-      r.name,
-      r.description,
-      r.points,
-      EXISTS(
-        SELECT 1
-        FROM user_rewards ur
-        WHERE ur.user_id=$1
-          AND ur.reward_id=r.id
-      ) AS claimed
-    FROM rewards r
-    ORDER BY r.points ASC
-  `,[user.id]);
-
-  sendJson(res,{
-    ok:true,
-    points:Number(points.rows[0]?.points || 0),
-    rewards:rewards.rows
-  });
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// ADD USER POINTS
-// INTERNAL SAFE SYSTEM EVENT
-// ------------------------------------------------------------
-
-async function addUserPoints(userId, amount) {
-
-  const safeAmount =
-    Math.max(
-      0,
-      Math.min(
-        Number(amount) || 0,
-        100
-      )
-    );
-
-  if (
-    !Number.isInteger(userId) ||
-    userId <= 0 ||
-    safeAmount <= 0
-  ) {
-    return;
-  }
-
-  await pool.query(`
-    INSERT INTO user_points(
-      user_id,
-      points
-    )
-    VALUES($1,$2)
-    ON CONFLICT(user_id)
-    DO UPDATE SET
-      points=user_points.points + EXCLUDED.points,
-      updated_at=NOW()
-  `,[
-    userId,
-    safeAmount
-  ]);
-}
-
-
-// ------------------------------------------------------------
-// AUTOMATIC REWARD FOR FIRST POST
-// ------------------------------------------------------------
-
-if (
-  req.method === "POST" &&
-  path === "/api/reward/post-created"
-) {
-
-  const count = await pool.query(`
-    SELECT COUNT(*)::INTEGER AS count
-    FROM posts
-    WHERE user_id=$1
-  `,[user.id]);
-
-  if (
-    Number(count.rows[0].count) === 1
-  ) {
-
-    await addUserPoints(
-      user.id,
-      10
-    );
-  }
-
-  sendJson(res,{
-    ok:true
-  });
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// CALL CLEANUP
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/api/call/cleanup"
-) {
-
-  await pool.query(`
-    UPDATE calls
-    SET
-      status='ended',
-      ended_at=NOW()
-    WHERE status IN('ringing','active')
-      AND created_at < NOW() - INTERVAL '2 hours'
-  `);
-
-  await pool.query(`
-    DELETE FROM call_signals
-    WHERE created_at < NOW() - INTERVAL '24 hours'
-  `);
-
-  sendJson(res,{
-    ok:true
-  });
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// EXPIRED DATA CLEANUP
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/api/system/cleanup"
-) {
-
-  await pool.query(`
-    DELETE FROM stories
-    WHERE expires_at <= NOW()
-  `);
-
-  await pool.query(`
-    DELETE FROM call_signals
-    WHERE created_at < NOW() - INTERVAL '24 hours'
-  `);
-
-  await pool.query(`
-    DELETE FROM ad_events
-    WHERE created_at < NOW() - INTERVAL '180 days'
-  `);
-
-  await pool.query(`
-    DELETE FROM post_views
-    WHERE viewed_at < NOW() - INTERVAL '365 days'
-  `);
-
-  sendJson(res,{
-    ok:true,
-    cleaned:true
-  });
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// SYSTEM STATUS
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/api/system/status"
-) {
-
-  const db = await pool.query(`
-    SELECT NOW() AS server_time
-  `);
-
-  sendJson(res,{
-    ok:true,
-    service:"MySocial",
-    status:"online",
-    database:"connected",
-    server_time:db.rows[0].server_time
-  });
-
-  return;
-}// ============================================================
-// SECTION 17
-// ADVANCED POSTS / MENTIONS / HASHTAGS / SAVED CONTENT
-// CONTENT MODERATION / USER RESTRICTIONS / REPORTING
-// ============================================================
-
-
-// ------------------------------------------------------------
-// POST MENTIONS
-// ------------------------------------------------------------
-
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS post_mentions (
-    id SERIAL PRIMARY KEY,
-    post_id INTEGER NOT NULL
-      REFERENCES posts(id) ON DELETE CASCADE,
-    mentioned_user_id INTEGER NOT NULL
-      REFERENCES users(id) ON DELETE CASCADE,
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(post_id,mentioned_user_id)
-  )
-`);
-
-await pool.query(`
-  CREATE INDEX IF NOT EXISTS idx_post_mentions_user
-  ON post_mentions(mentioned_user_id,created_at DESC)
-`);
-
-
-// ------------------------------------------------------------
-// STORY MENTIONS
-// ------------------------------------------------------------
-
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS story_mentions (
-    id SERIAL PRIMARY KEY,
-    story_id INTEGER NOT NULL
-      REFERENCES stories(id) ON DELETE CASCADE,
-    mentioned_user_id INTEGER NOT NULL
-      REFERENCES users(id) ON DELETE CASCADE,
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(story_id,mentioned_user_id)
-  )
-`);
-
-
-// ------------------------------------------------------------
-// REEL MENTIONS
-// ------------------------------------------------------------
-
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS reel_mentions (
-    id SERIAL PRIMARY KEY,
-    reel_id INTEGER NOT NULL
-      REFERENCES reels(id) ON DELETE CASCADE,
-    mentioned_user_id INTEGER NOT NULL
-      REFERENCES users(id) ON DELETE CASCADE,
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(reel_id,mentioned_user_id)
-  )
-`);
-
-
-// ------------------------------------------------------------
-// MENTION USER API
-// ------------------------------------------------------------
-
-if (
-  req.method === "POST" &&
-  path === "/api/mention"
-) {
-
-  const d = await readBody(req);
-
-  const type =
-    (d.get("type") || "").trim();
-
-  const contentId =
-    Number(d.get("content_id"));
-
-  const mentionedUserId =
-    Number(d.get("user_id"));
-
-  if (
-    !["post","story","reel"].includes(type) ||
-    !Number.isInteger(contentId) ||
-    contentId <= 0 ||
-    !Number.isInteger(mentionedUserId) ||
-    mentionedUserId <= 0 ||
-    mentionedUserId === user.id
-  ) {
-
-    sendJson(res,{
-      ok:false,
-      error:"invalid_data"
-    },400);
-
-    return;
-  }
-
-  const target = await pool.query(`
-    SELECT id
-    FROM users
-    WHERE id=$1
-    LIMIT 1
-  `,[mentionedUserId]);
-
-  if (!target.rows.length) {
-
-    sendJson(res,{
-      ok:false,
-      error:"user_not_found"
-    },404);
-
-    return;
-  }
-
-  if (type === "post") {
-
-    const post = await pool.query(`
-      SELECT id
-      FROM posts
-      WHERE id=$1
-        AND user_id=$2
-      LIMIT 1
-    `,[
-      contentId,
-      user.id
-    ]);
-
-    if (post.rows.length) {
-
-      await pool.query(`
-        INSERT INTO post_mentions(
-          post_id,
-          mentioned_user_id
-        )
-        VALUES($1,$2)
-        ON CONFLICT(post_id,mentioned_user_id)
-        DO NOTHING
-      `,[
-        contentId,
-        mentionedUserId
-      ]);
-
-      await notify(
-        mentionedUserId,
-        user.id,
-        "mention",
-        contentId,
-        `${user.name} شما را در یک پست منشن کرد.`
-      );
-    }
-  }
-
-  if (type === "story") {
-
-    const story = await pool.query(`
-      SELECT id
-      FROM stories
-      WHERE id=$1
-        AND user_id=$2
-      LIMIT 1
-    `,[
-      contentId,
-      user.id
-    ]);
-
-    if (story.rows.length) {
-
-      await pool.query(`
-        INSERT INTO story_mentions(
-          story_id,
-          mentioned_user_id
-        )
-        VALUES($1,$2)
-        ON CONFLICT(story_id,mentioned_user_id)
-        DO NOTHING
-      `,[
-        contentId,
-        mentionedUserId
-      ]);
-
-      await notify(
-        mentionedUserId,
-        user.id,
-        "mention",
-        contentId,
-        `${user.name} شما را در یک استوری منشن کرد.`
-      );
-    }
-  }
-
-  if (type === "reel") {
-
-    const reel = await pool.query(`
-      SELECT id
-      FROM reels
-      WHERE id=$1
-        AND user_id=$2
-      LIMIT 1
-    `,[
-      contentId,
-      user.id
-    ]);
-
-    if (reel.rows.length) {
-
-      await pool.query(`
-        INSERT INTO reel_mentions(
-          reel_id,
-          mentioned_user_id
-        )
-        VALUES($1,$2)
-        ON CONFLICT(reel_id,mentioned_user_id)
-        DO NOTHING
-      `,[
-        contentId,
-        mentionedUserId
-      ]);
-
-      await notify(
-        mentionedUserId,
-        user.id,
-        "mention",
-        contentId,
-        `${user.name} شما را در یک ریل منشن کرد.`
-      );
-    }
-  }
-
-  sendJson(res,{
-    ok:true
-  });
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// MY MENTIONS
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/mentions"
-) {
-
-  const posts = await pool.query(`
-    SELECT
-      p.id,
-      p.content,
-      p.created_at,
-      u.id AS user_id,
-      u.name,
-      u.username
-    FROM post_mentions pm
-    JOIN posts p
-      ON p.id=pm.post_id
-    JOIN users u
-      ON u.id=p.user_id
-    WHERE pm.mentioned_user_id=$1
-    ORDER BY pm.created_at DESC
-    LIMIT 100
-  `,[user.id]);
-
-  sendPage(
-    res,
-    "منشن‌های من",
-    `
-      <div class="card">
-        <h2>🏷️ منشن‌های من</h2>
-
-        ${
-          posts.rows.length
-          ? posts.rows.map(p => `
-              <div class="card">
-                <strong>
-                  ${escapeHtml(p.name)}
-                </strong>
-
-                <p>
-                  ${escapeHtml(p.content)}
-                </p>
-
-                <a
-                  class="btn"
-                  href="/post?id=${p.id}"
-                >
-                  مشاهده پست
-                </a>
-              </div>
-            `).join("")
-          : "<p>هنوز کسی شما را منشن نکرده است.</p>"
-        }
-      </div>
-    `
-  );
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// CONTENT MODERATION TABLE
-// ------------------------------------------------------------
-
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS moderation_actions (
-    id SERIAL PRIMARY KEY,
-    target_type VARCHAR(30) NOT NULL,
-    target_id INTEGER NOT NULL,
-    moderator_id INTEGER NOT NULL
-      REFERENCES users(id) ON DELETE CASCADE,
-    action VARCHAR(40) NOT NULL,
-    reason TEXT,
-    created_at TIMESTAMP DEFAULT NOW()
-  )
-`);
-
-await pool.query(`
-  CREATE INDEX IF NOT EXISTS idx_moderation_target
-  ON moderation_actions(
-    target_type,
-    target_id,
-    created_at DESC
-  )
-`);
-
-
-// ------------------------------------------------------------
-// HIDE POST
-// ------------------------------------------------------------
-
-if (
-  req.method === "POST" &&
-  path === "/api/post/hide"
-) {
-
-  const d = await readBody(req);
-
-  const postId =
-    Number(d.get("post_id"));
-
-  if (
-    !Number.isInteger(postId) ||
-    postId <= 0
-  ) {
-
-    sendJson(res,{
-      ok:false,
-      error:"invalid_post"
-    },400);
-
-    return;
-  }
-
-  const post = await pool.query(`
-    SELECT id
-    FROM posts
-    WHERE id=$1
-    LIMIT 1
-  `,[postId]);
-
-  if (!post.rows.length) {
-
-    sendJson(res,{
-      ok:false,
-      error:"post_not_found"
-    },404);
-
-    return;
-  }
-
-  await pool.query(`
-    INSERT INTO moderation_actions(
-      target_type,
-      target_id,
-      moderator_id,
-      action,
-      reason
-    )
-    VALUES(
-      'post',
-      $1,
-      $2,
-      'hide',
-      'user_hidden'
-    )
-  `,[
-    postId,
-    user.id
-  ]);
-
-  sendJson(res,{
-    ok:true
-  });
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// USER CONTENT PREFERENCES
-// ------------------------------------------------------------
-
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS content_preferences (
-    user_id INTEGER PRIMARY KEY
-      REFERENCES users(id) ON DELETE CASCADE,
-    sensitive_content VARCHAR(20)
-      NOT NULL DEFAULT 'standard',
-    autoplay BOOLEAN
-      NOT NULL DEFAULT TRUE,
-    show_suggested BOOLEAN
-      NOT NULL DEFAULT TRUE,
-    updated_at TIMESTAMP DEFAULT NOW()
-  )
-`);
-
-
-// ------------------------------------------------------------
-// CONTENT PREFERENCES PAGE
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/content-preferences"
-) {
-
-  const settings = await pool.query(`
-    SELECT
-      sensitive_content,
-      autoplay,
-      show_suggested
-    FROM content_preferences
-    WHERE user_id=$1
-  `,[user.id]);
-
-  const s = settings.rows[0] || {
-    sensitive_content:"standard",
-    autoplay:true,
-    show_suggested:true
-  };
-
-  sendPage(
-    res,
-    "تنظیمات محتوا",
-    `
-      <div class="card">
-        <h2>⚙️ تنظیمات محتوا</h2>
-
-        <form method="POST"
-              action="/content-preferences">
-
-          <label>محتوای حساس</label>
-
-          <select name="sensitive_content">
-            <option value="standard"
-              ${s.sensitive_content==="standard"?"selected":""}>
-              استاندارد
-            </option>
-
-            <option value="less"
-              ${s.sensitive_content==="less"?"selected":""}>
-              کمتر
-            </option>
-          </select>
-
-          <label>
-            پخش خودکار
-          </label>
-
-          <select name="autoplay">
-            <option value="1"
-              ${s.autoplay?"selected":""}>
-              فعال
-            </option>
-
-            <option value="0"
-              ${!s.autoplay?"selected":""}>
-              غیرفعال
-            </option>
-          </select>
-
-          <label>
-            نمایش پیشنهادها
-          </label>
-
-          <select name="show_suggested">
-            <option value="1"
-              ${s.show_suggested?"selected":""}>
-              فعال
-            </option>
-
-            <option value="0"
-              ${!s.show_suggested?"selected":""}>
-              غیرفعال
-            </option>
-          </select>
-
-          <button class="btn">
-            ذخیره تنظیمات
-          </button>
-        </form>
-      </div>
-    `
-  );
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// SAVE CONTENT PREFERENCES
-// ------------------------------------------------------------
-
-if (
-  req.method === "POST" &&
-  path === "/content-preferences"
-) {
-
-  const d = await readBody(req);
-
-  const sensitive =
-    d.get("sensitive_content") === "less"
-      ? "less"
-      : "standard";
-
-  const autoplay =
-    d.get("autoplay") === "1";
-
-  const suggested =
-    d.get("show_suggested") === "1";
-
-  await pool.query(`
-    INSERT INTO content_preferences(
-      user_id,
-      sensitive_content,
-      autoplay,
-      show_suggested
-    )
-    VALUES($1,$2,$3,$4)
-    ON CONFLICT(user_id)
-    DO UPDATE SET
-      sensitive_content=EXCLUDED.sensitive_content,
-      autoplay=EXCLUDED.autoplay,
-      show_suggested=EXCLUDED.show_suggested,
-      updated_at=NOW()
-  `,[
-    user.id,
-    sensitive,
-    autoplay,
-    suggested
-  ]);
-
-  redirect(
-    res,
-    "/content-preferences"
-  );
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// USER RESTRICTION STATUS API
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/api/user/restrictions"
-) {
-
-  const targetId =
-    Number(url.searchParams.get("id"));
-
-  if (
-    !Number.isInteger(targetId) ||
-    targetId <= 0
-  ) {
-
-    sendJson(res,{
-      ok:false,
-      error:"invalid_user"
-    },400);
-
-    return;
-  }
-
-  const result = await pool.query(`
-    SELECT
-      EXISTS(
-        SELECT 1
-        FROM blocked_users
-        WHERE blocker_id=$1
-          AND blocked_id=$2
-      ) AS blocked,
-
-      EXISTS(
-        SELECT 1
-        FROM restrictions
-        WHERE user_id=$1
-          AND restricted_user_id=$2
-      ) AS restricted,
-
-      EXISTS(
-        SELECT 1
-        FROM mutes
-        WHERE user_id=$1
-          AND muted_user_id=$2
-      ) AS muted
-  `,[
-    user.id,
-    targetId
-  ]);
-
-  sendJson(res,{
-    ok:true,
-    restrictions:result.rows[0]
-  });
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// REPORT CONTENT API
-// ------------------------------------------------------------
-
-if (
-  req.method === "POST" &&
-  path === "/api/report-content"
-) {
-
-  const d = await readBody(req);
-
-  const targetType =
-    (d.get("target_type") || "").trim();
-
-  const targetId =
-    Number(d.get("target_id"));
-
-  const reason =
-    (d.get("reason") || "").trim();
-
-  const allowedTypes = [
-    "post",
-    "comment",
-    "reel",
-    "story",
-    "user",
-    "message",
-    "group",
-    "channel",
-    "business"
-  ];
-
-  if (
-    !allowedTypes.includes(targetType) ||
-    !Number.isInteger(targetId) ||
-    targetId <= 0 ||
-    !reason
-  ) {
-
-    sendJson(res,{
-      ok:false,
-      error:"invalid_report"
-    },400);
-
-    return;
-  }
-
-  await pool.query(`
-    INSERT INTO reports(
-      reporter_id,
-      target_type,
-      target_id,
-      reason,
-      status
-    )
-    VALUES($1,$2,$3,$4,'pending')
-  `,[
-    user.id,
+) {   user.id,
     targetType,
     targetId,
     reason.slice(0,1000)
@@ -13524,17 +9468,9 @@ if (
   });
 
   return;
-}// ============================================================
-// SECTION 18
-// SHOP / PRODUCTS / CART / ORDERS
-// SELLER MANAGEMENT / WISHLIST
-// ============================================================
+}
 
-
-// ------------------------------------------------------------
-// SHOP TABLES
-// ------------------------------------------------------------
-
+/* EXTRA FEATURE SECTION 18 */
 await pool.query(`
   CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
@@ -14191,13 +10127,2005 @@ if (
       description,
       price,
       currency,
-      image_url,
-      stock,
-      category
-    )
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+      image_url,    user.id,
+    targetType,
+    targetId,
+    reason.slice(0,1000)
+  ]);
+
+  sendJson(res,{
+    ok:true,
+    reported:true
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// REPORT STATUS API
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/api/reports"
+) {
+
+  const rows = await pool.query(`
+    SELECT
+      id,
+      target_type,
+      target_id,
+      reason,
+      status,
+      created_at
+    FROM reports
+    WHERE reporter_id=$1
+    ORDER BY created_at DESC
+    LIMIT 100
+  `,[user.id]);
+
+  sendJson(res,{
+    ok:true,
+    reports:rows.rows
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// DELETE OWN REPORT
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/api/report/delete"
+) {
+
+  const d = await readBody(req);
+
+  const reportId =
+    Number(d.get("report_id"));
+
+  if (
+    !Number.isInteger(reportId) ||
+    reportId <= 0
+  ) {
+
+    sendJson(res,{
+      ok:false,
+      error:"invalid_report"
+    },400);
+
+    return;
+  }
+
+  await pool.query(`
+    DELETE FROM reports
+    WHERE id=$1
+      AND reporter_id=$2
+      AND status='pending'
+  `,[
+    reportId,
+    user.id
+  ]);
+
+  sendJson(res,{
+    ok:true
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// SAVED POSTS API
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/api/saved"
+) {
+
+  const rows = await pool.query(`
+    SELECT
+      p.id,
+      p.content,
+      p.image_url,
+      p.created_at,
+      u.id AS user_id,
+      u.name,
+      u.username
+    FROM bookmarks b
+    JOIN posts p
+      ON p.id=b.post_id
+    JOIN users u
+      ON u.id=p.user_id
+    WHERE b.user_id=$1
+      AND COALESCE(p.archived,FALSE)=FALSE
+    ORDER BY b.created_at DESC
+    LIMIT 200
+  `,[user.id]);
+
+  sendJson(res,{
+    ok:true,
+    posts:rows.rows
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// REMOVE SAVED POST
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/api/saved/remove"
+) {
+
+  const d = await readBody(req);
+
+  const postId =
+    Number(d.get("post_id"));
+
+  if (
+    !Number.isInteger(postId) ||
+    postId <= 0
+  ) {
+
+    sendJson(res,{
+      ok:false,
+      error:"invalid_post"
+    },400);
+
+    return;
+  }
+
+  await pool.query(`
+    DELETE FROM bookmarks
+    WHERE user_id=$1
+      AND post_id=$2
   `,[
     user.id,
+    postId
+  ]);
+
+  sendJson(res,{
+    ok:true
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// HASHTAG FOLLOWING
+// ------------------------------------------------------------
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS hashtag_follows (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL
+      REFERENCES users(id) ON DELETE CASCADE,
+    hashtag_id INTEGER NOT NULL
+      REFERENCES hashtags(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(user_id,hashtag_id)
+  )
+`);
+
+
+// ------------------------------------------------------------
+// FOLLOW HASHTAG
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/hashtag-follow"
+) {
+
+  const hashtagId =
+    Number(url.searchParams.get("id"));
+
+  if (
+    Number.isInteger(hashtagId) &&
+    hashtagId > 0
+  ) {
+
+    const exists = await pool.query(`
+      SELECT 1
+      FROM hashtag_follows
+      WHERE user_id=$1
+        AND hashtag_id=$2
+      LIMIT 1
+    `,[
+      user.id,
+      hashtagId
+    ]);
+
+    if (exists.rows.length) {
+
+      await pool.query(`
+        DELETE FROM hashtag_follows
+        WHERE user_id=$1
+          AND hashtag_id=$2
+      `,[
+        user.id,
+        hashtagId
+      ]);
+
+    } else {
+
+      await pool.query(`
+        INSERT INTO hashtag_follows(
+          user_id,
+          hashtag_id
+        )
+        VALUES($1,$2)
+        ON CONFLICT(user_id,hashtag_id)
+        DO NOTHING
+      `,[
+        user.id,
+        hashtagId
+      ]);
+    }
+  }
+
+  redirect(
+    res,
+    `/hashtag?id=${hashtagId}`
+  );
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// HASHTAG FOLLOWING API
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/api/hashtag-following"
+) {
+
+  const rows = await pool.query(`
+    SELECT
+      h.id,
+      h.name,
+      hf.created_at
+    FROM hashtag_follows hf
+    JOIN hashtags h
+      ON h.id=hf.hashtag_id
+    WHERE hf.user_id=$1
+    ORDER BY hf.created_at DESC
+  `,[user.id]);
+
+  sendJson(res,{
+    ok:true,
+    hashtags:rows.rows
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// USER SEARCH SUGGESTIONS
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/api/suggestions"
+) {
+
+  const q =
+    (url.searchParams.get("q") || "")
+      .trim()
+      .toLowerCase();
+
+  if (!q) {
+
+    sendJson(res,{
+      ok:true,
+      users:[]
+    });
+
+    return;
+  }
+
+  const rows = await pool.query(`
+    SELECT
+      id,
+      name,
+      username,
+      avatar_url
+    FROM users
+    WHERE
+      LOWER(name) LIKE $1
+      OR LOWER(username) LIKE $1
+    ORDER BY
+      CASE
+        WHEN LOWER(username)=$2 THEN 0
+        WHEN LOWER(username) LIKE $3 THEN 1
+        ELSE 2
+      END,
+      name ASC
+    LIMIT 20
+  `,[
+    `%${q}%`,
+    q,
+    `${q}%`
+  ]);
+
+  sendJson(res,{
+    ok:true,
+    users:rows.rows
+  });
+
+  return;
+}
+
+/* EXTRA FEATURE SECTION 18 */
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS products (
+    id SERIAL PRIMARY KEY,
+    seller_id INTEGER NOT NULL
+      REFERENCES users(id) ON DELETE CASCADE,
+
+    name VARCHAR(200) NOT NULL,
+    description TEXT DEFAULT '',
+    price NUMERIC(14,2) NOT NULL DEFAULT 0,
+    currency VARCHAR(10) NOT NULL DEFAULT 'IRR',
+
+    image_url TEXT DEFAULT '',
+    stock INTEGER NOT NULL DEFAULT 0,
+
+    category VARCHAR(100) DEFAULT '',
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+
+    CHECK(price >= 0),
+    CHECK(stock >= 0)
+  )
+`);
+
+await pool.query(`
+  CREATE INDEX IF NOT EXISTS idx_products_seller
+  ON products(seller_id,created_at DESC)
+`);
+
+await pool.query(`
+  CREATE INDEX IF NOT EXISTS idx_products_category
+  ON products(category,created_at DESC)
+`);
+
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS cart_items (
+    id SERIAL PRIMARY KEY,
+
+    user_id INTEGER NOT NULL
+      REFERENCES users(id) ON DELETE CASCADE,
+
+    product_id INTEGER NOT NULL
+      REFERENCES products(id) ON DELETE CASCADE,
+
+    quantity INTEGER NOT NULL DEFAULT 1,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+
+    UNIQUE(user_id,product_id),
+
+    CHECK(quantity > 0)
+  )
+`);
+
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS wishlist_items (
+    id SERIAL PRIMARY KEY,
+
+    user_id INTEGER NOT NULL
+      REFERENCES users(id) ON DELETE CASCADE,
+
+    product_id INTEGER NOT NULL
+      REFERENCES products(id) ON DELETE CASCADE,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+
+    UNIQUE(user_id,product_id)
+  )
+`);
+
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS shop_orders (
+    id SERIAL PRIMARY KEY,
+
+    buyer_id INTEGER NOT NULL
+      REFERENCES users(id) ON DELETE CASCADE,
+
+    total_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+    currency VARCHAR(10) NOT NULL DEFAULT 'IRR',
+
+    status VARCHAR(30) NOT NULL DEFAULT 'pending',
+
+    shipping_name VARCHAR(200) DEFAULT '',
+    shipping_phone VARCHAR(50) DEFAULT '',
+    shipping_address TEXT DEFAULT '',
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+
+    CHECK(total_amount >= 0)
+  )
+`);
+
+
+await pool.query(`
+  CREATE INDEX IF NOT EXISTS idx_shop_orders_buyer
+  ON shop_orders(buyer_id,created_at DESC)
+`);
+
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS shop_order_items (
+    id SERIAL PRIMARY KEY,
+
+    order_id INTEGER NOT NULL
+      REFERENCES shop_orders(id) ON DELETE CASCADE,
+
+    product_id INTEGER
+      REFERENCES products(id) ON DELETE SET NULL,
+
+    seller_id INTEGER
+      REFERENCES users(id) ON DELETE SET NULL,
+
+    product_name VARCHAR(200) NOT NULL DEFAULT '',
+
+    quantity INTEGER NOT NULL DEFAULT 1,
+
+    unit_price NUMERIC(14,2) NOT NULL DEFAULT 0,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+
+    CHECK(quantity > 0),
+    CHECK(unit_price >= 0)
+  )
+`);
+
+
+await pool.query(`
+  CREATE INDEX IF NOT EXISTS idx_shop_order_items_order
+  ON shop_order_items(order_id)
+`);
+
+
+// ------------------------------------------------------------
+// SHOP HOME
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/shop"
+) {
+
+  const q =
+    (url.searchParams.get("q") || "")
+      .trim();
+
+  const category =
+    (url.searchParams.get("category") || "")
+      .trim();
+
+  const products = await pool.query(`
+    SELECT
+      p.id,
+      p.name,
+      p.description,
+      p.price,
+      p.currency,
+      p.image_url,
+      p.stock,
+      p.category,
+      p.seller_id,
+      u.name AS seller_name,
+      u.username AS seller_username
+    FROM products p
+    JOIN users u
+      ON u.id=p.seller_id
+    WHERE
+      p.active=TRUE
+      AND p.stock > 0
+      AND (
+        $1=''
+        OR LOWER(p.name) LIKE LOWER($2)
+        OR LOWER(p.description) LIKE LOWER($2)
+      )
+      AND (
+        $3=''
+        OR LOWER(p.category)=LOWER($3)
+      )
+    ORDER BY p.created_at DESC
+    LIMIT 100
+  `,[
+    q,
+    `%${q}%`,
+    category
+  ]);
+
+  sendPage(
+    res,
+    "فروشگاه",
+    `
+      <div class="card">
+        <h2>🛍️ فروشگاه MySocial</h2>
+
+        <form method="GET" action="/shop">
+
+          <input
+            name="q"
+            value="${escapeHtml(q)}"
+            placeholder="جستجوی محصول..."
+          >
+
+          <input
+            name="category"
+            value="${escapeHtml(category)}"
+            placeholder="دسته‌بندی"
+          >
+
+          <button class="btn">
+            جستجو
+          </button>
+        </form>
+
+        <p>
+          <a class="btn"
+             href="/shop-seller">
+            مدیریت محصولات من
+          </a>
+
+          <a class="btn"
+             href="/cart">
+            🛒 سبد خرید
+          </a>
+
+          <a class="btn"
+             href="/wishlist">
+            ❤️ علاقه‌مندی‌ها
+          </a>
+
+          <a class="btn"
+             href="/orders">
+            📦 سفارش‌های من
+          </a>
+        </p>
+      </div>
+
+      <div class="grid">
+
+        ${
+          products.rows.length
+          ? products.rows.map(p => `
+
+              <div class="card">
+
+                ${
+                  p.image_url
+                  ? `
+                    <img
+                      src="${escapeHtml(p.image_url)}"
+                      style="
+                        width:100%;
+                        max-height:280px;
+                        object-fit:cover;
+                        border-radius:12px;
+                      "
+                    >
+                  `
+                  : ""
+                }
+
+                <h3>
+                  ${escapeHtml(p.name)}
+                </h3>
+
+                <p>
+                  ${escapeHtml(p.description || "")}
+                </p>
+
+                <strong>
+                  ${escapeHtml(String(p.price))}
+                  ${escapeHtml(p.currency)}
+                </strong>
+
+                <p>
+                  فروشنده:
+                  ${escapeHtml(p.seller_name)}
+                </p>
+
+                <p>
+                  موجودی:
+                  ${p.stock}
+                </p>
+
+                <a
+                  class="btn"
+                  href="/product?id=${p.id}"
+                >
+                  مشاهده
+                </a>
+
+              </div>
+
+            `).join("")
+          : `
+            <div class="card">
+              <p>
+                محصولی پیدا نشد.
+              </p>
+            </div>
+          `
+        }
+
+      </div>
+    `
+  );
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// PRODUCT PAGE
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/product"
+) {
+
+  const productId =
+    Number(url.searchParams.get("id"));
+
+  if (
+    !Number.isInteger(productId) ||
+    productId <= 0
+  ) {
+
+    redirect(res,"/shop");
+    return;
+  }
+
+  const result = await pool.query(`
+    SELECT
+      p.*,
+      u.name AS seller_name,
+      u.username AS seller_username
+    FROM products p
+    JOIN users u
+      ON u.id=p.seller_id
+    WHERE p.id=$1
+      AND p.active=TRUE
+    LIMIT 1
+  `,[productId]);
+
+  if (!result.rows.length) {
+
+    redirect(res,"/shop");
+    return;
+  }
+
+  const p = result.rows[0];
+
+  sendPage(
+    res,
+    p.name,
+    `
+      <div class="card">
+
+        ${
+          p.image_url
+          ? `
+            <img
+              src="${escapeHtml(p.image_url)}"
+              style="
+                width:100%;
+                max-height:500px;
+                object-fit:contain;
+                border-radius:14px;
+              "
+            >
+          `
+          : ""
+        }
+
+        <h2>
+          ${escapeHtml(p.name)}
+        </h2>
+
+        <p>
+          ${escapeHtml(p.description || "")}
+        </p>
+
+        <h3>
+          ${escapeHtml(String(p.price))}
+          ${escapeHtml(p.currency)}
+        </h3>
+
+        <p>
+          موجودی:
+          ${p.stock}
+        </p>
+
+        <p>
+          فروشنده:
+          <a href="/profile?id=${p.seller_id}">
+            ${escapeHtml(p.seller_name)}
+          </a>
+        </p>
+
+        ${
+          p.stock > 0
+          ? `
+            <form method="POST"
+                  action="/cart-add">
+
+              <input
+                type="hidden"
+                name="product_id"
+                value="${p.id}"
+              >
+
+              <input
+                type="number"
+                name="quantity"
+                min="1"
+                max="${p.stock}"
+                value="1"
+              >
+
+              <button class="btn">
+                🛒 افزودن به سبد
+              </button>
+            </form>
+          `
+          : `
+            <p>
+              این محصول فعلاً موجود نیست.
+            </p>
+          `
+        }
+
+        <p>
+
+          <a
+            class="btn"
+            href="/wishlist-add?id=${p.id}"
+          >
+            ❤️ افزودن به علاقه‌مندی
+          </a>
+
+        </p>
+
+      </div>
+    `
+  );
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// SELLER DASHBOARD
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/shop-seller"
+) {
+
+  const products = await pool.query(`
+    SELECT
+      id,
+      name,
+      description,
+      price,
+      currency,
+      stock,
+      category,
+      active,
+      created_at
+    FROM products
+    WHERE seller_id=$1
+    ORDER BY created_at DESC
+    LIMIT 200
+  `,[user.id]);
+
+  sendPage(
+    res,
+    "مدیریت فروشگاه",
+    `
+      <div class="card">
+
+        <h2>
+          🏪 مدیریت محصولات
+        </h2>
+
+        <form method="POST"
+              action="/product-create">
+
+          <input
+            name="name"
+            placeholder="نام محصول"
+            required
+          >
+
+          <textarea
+            name="description"
+            placeholder="توضیحات محصول"
+          ></textarea>
+
+          <input
+            name="price"
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="قیمت"
+            required
+          >
+
+          <input
+            name="currency"
+            value="IRR"
+            maxlength="10"
+          >
+
+          <input
+            name="stock"
+            type="number"
+            min="0"
+            value="1"
+            placeholder="موجودی"
+          >
+
+          <input
+            name="category"
+            placeholder="دسته‌بندی"
+          >
+
+          <input
+            name="image_url"
+            placeholder="آدرس تصویر محصول"
+          >
+
+          <button class="btn">
+            ایجاد محصول
+          </button>
+
+        </form>
+      </div>
+
+      ${
+        products.rows.map(p => `
+          <div class="card">
+
+            <h3>
+              ${escapeHtml(p.name)}
+            </h3>
+
+            <p>
+              قیمت:
+              ${escapeHtml(String(p.price))}
+              ${escapeHtml(p.currency)}
+            </p>
+
+            <p>
+              موجودی:
+              ${p.stock}
+            </p>
+
+            <p>
+              وضعیت:
+              ${p.active ? "فعال" : "غیرفعال"}
+            </p>
+
+            <a
+              class="btn"
+              href="/product-edit?id=${p.id}"
+            >
+              ویرایش
+            </a>
+
+            <a
+              class="btn"
+              href="/product-toggle?id=${p.id}"
+            >
+              ${p.active ? "غیرفعال کردن" : "فعال کردن"}
+            </a>
+
+          </div>
+        `).join("")
+      }
+    `
+  );
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// CREATE PRODUCT
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/product-create"
+) {
+
+  const d = await readBody(req);
+
+  const name =
+    (d.get("name") || "").trim();
+
+  const description =
+    (d.get("description") || "").trim();
+
+  const price =
+    Number(d.get("price"));
+
+  const currency =
+    (d.get("currency") || "IRR")
+      .trim()
+      .slice(0,10);
+
+  const stock =
+    Number(d.get("stock"));
+
+  const category =
+    (d.get("category") || "")
+      .trim()
+      .slice(0,100);
+
+  let imageUrl =
+    (d.get("image_url") || "").trim();
+
+  if (!name ||
+      !Number.isFinite(price) ||
+      price < 0 ||
+      !Number.isInteger(stock) ||
+      stock < 0) {
+
+    redirect(res,"/shop-seller");
+    return;
+  }
+
+  if (imageUrl) {
+
+    const safe = safeUrl(imageUrl);
+
+    if (!safe) {
+      imageUrl = "";
+    } else {
+      imageUrl = safe;
+    }
+  }
+
+  await pool.query(`
+    INSERT INTO products(
+      seller_id,
+      name,
+      description,
+      price,
+      currency,
+      image_url,   user.id,
+  targetType,
+  targetId,
+  reason.slice(0,1000)
+]);
+
+sendJson(res,{
+  ok:true,
+  reported:true
+});
+
+return;
+}
+
+
+// ------------------------------------------------------------
+// REPORT STATUS API
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/api/reports"
+) {
+
+  const rows = await pool.query(`
+    SELECT
+      id,
+      target_type,
+      target_id,
+      reason,
+      status,
+      created_at
+    FROM reports
+    WHERE reporter_id=$1
+    ORDER BY created_at DESC
+    LIMIT 100
+  `,[user.id]);
+
+  sendJson(res,{
+    ok:true,
+    reports:rows.rows
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// DELETE OWN REPORT
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/api/report/delete"
+) {
+
+  const d = await readBody(req);
+
+  const reportId =
+    Number(d.get("report_id"));
+
+  if (
+    !Number.isInteger(reportId) ||
+    reportId <= 0
+  ) {
+
+    sendJson(res,{
+      ok:false,
+      error:"invalid_report"
+    },400);
+
+    return;
+  }
+
+  await pool.query(`
+    DELETE FROM reports
+    WHERE id=$1
+      AND reporter_id=$2
+      AND status='pending'
+  `,[
+    reportId,
+    user.id
+  ]);
+
+  sendJson(res,{
+    ok:true
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// SAVED POSTS API
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/api/saved"
+) {
+
+  const rows = await pool.query(`
+    SELECT
+      p.id,
+      p.content,
+      p.image_url,
+      p.created_at,
+      u.id AS user_id,
+      u.name,
+      u.username
+    FROM bookmarks b
+    JOIN posts p
+      ON p.id=b.post_id
+    JOIN users u
+      ON u.id=p.user_id
+    WHERE b.user_id=$1
+      AND COALESCE(p.archived,FALSE)=FALSE
+    ORDER BY b.created_at DESC
+    LIMIT 200
+  `,[user.id]);
+
+  sendJson(res,{
+    ok:true,
+    posts:rows.rows
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// REMOVE SAVED POST
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/api/saved/remove"
+) {
+
+  const d = await readBody(req);
+
+  const postId =
+    Number(d.get("post_id"));
+
+  if (
+    !Number.isInteger(postId) ||
+    postId <= 0
+  ) {
+
+    sendJson(res,{
+      ok:false,
+      error:"invalid_post"
+    },400);
+
+    return;
+  }
+
+  await pool.query(`
+    DELETE FROM bookmarks
+    WHERE user_id=$1
+      AND post_id=$2
+  `,[
+    user.id,
+    postId
+  ]);
+
+  sendJson(res,{
+    ok:true
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// HASHTAG FOLLOWING
+// ------------------------------------------------------------
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS hashtag_follows (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL
+      REFERENCES users(id) ON DELETE CASCADE,
+    hashtag_id INTEGER NOT NULL
+      REFERENCES hashtags(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(user_id,hashtag_id)
+  )
+`);
+
+
+// ------------------------------------------------------------
+// FOLLOW HASHTAG
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/hashtag-follow"
+) {
+
+  const hashtagId =
+    Number(url.searchParams.get("id"));
+
+  if (
+    Number.isInteger(hashtagId) &&
+    hashtagId > 0
+  ) {
+
+    const exists = await pool.query(`
+      SELECT 1
+      FROM hashtag_follows
+      WHERE user_id=$1
+        AND hashtag_id=$2
+      LIMIT 1
+    `,[
+      user.id,
+      hashtagId
+    ]);
+
+    if (exists.rows.length) {
+
+      await pool.query(`
+        DELETE FROM hashtag_follows
+        WHERE user_id=$1
+          AND hashtag_id=$2
+      `,[
+        user.id,
+        hashtagId
+      ]);
+
+    } else {
+
+      await pool.query(`
+        INSERT INTO hashtag_follows(
+          user_id,
+          hashtag_id
+        )
+        VALUES($1,$2)
+        ON CONFLICT(user_id,hashtag_id)
+        DO NOTHING
+      `,[
+        user.id,
+        hashtagId
+      ]);
+    }
+  }
+
+  redirect(
+    res,
+    `/hashtag?id=${hashtagId}`
+  );
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// HASHTAG FOLLOWING API
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/api/hashtag-following"
+) {
+
+  const rows = await pool.query(`
+    SELECT
+      h.id,
+      h.name,
+      hf.created_at
+    FROM hashtag_follows hf
+    JOIN hashtags h
+      ON h.id=hf.hashtag_id
+    WHERE hf.user_id=$1
+    ORDER BY hf.created_at DESC
+  `,[user.id]);
+
+  sendJson(res,{
+    ok:true,
+    hashtags:rows.rows
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// USER SEARCH SUGGESTIONS
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/api/suggestions"
+) {
+
+  const q =
+    (url.searchParams.get("q") || "")
+      .trim()
+      .toLowerCase();
+
+  if (!q) {
+
+    sendJson(res,{
+      ok:true,
+      users:[]
+    });
+
+    return;
+  }
+
+  const rows = await pool.query(`
+    SELECT
+      id,
+      name,
+      username,
+      avatar_url
+    FROM users
+    WHERE
+      LOWER(name) LIKE $1
+      OR LOWER(username) LIKE $1
+    ORDER BY
+      CASE
+        WHEN LOWER(username)=$2 THEN 0
+        WHEN LOWER(username) LIKE $3 THEN 1
+        ELSE 2
+      END,
+      name ASC
+    LIMIT 20
+  `,[
+    `%${q}%`,
+    q,
+    `${q}%`
+  ]);
+
+  sendJson(res,{
+    ok:true,
+    users:rows.rows
+  });
+
+  return;
+}
+
+/* EXTRA FEATURE SECTION 18 */
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS products (
+    id SERIAL PRIMARY KEY,
+    seller_id INTEGER NOT NULL
+      REFERENCES users(id) ON DELETE CASCADE,
+
+    name VARCHAR(200) NOT NULL,
+    description TEXT DEFAULT '',
+    price NUMERIC(14,2) NOT NULL DEFAULT 0,
+    currency VARCHAR(10) NOT NULL DEFAULT 'IRR',
+
+    image_url TEXT DEFAULT '',
+    stock INTEGER NOT NULL DEFAULT 0,
+
+    category VARCHAR(100) DEFAULT '',
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+
+    CHECK(price >= 0),
+    CHECK(stock >= 0)
+  )
+`);
+
+await pool.query(`
+  CREATE INDEX IF NOT EXISTS idx_products_seller
+  ON products(seller_id,created_at DESC)
+`);
+
+await pool.query(`
+  CREATE INDEX IF NOT EXISTS idx_products_category
+  ON products(category,created_at DESC)
+`);
+
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS cart_items (
+    id SERIAL PRIMARY KEY,
+
+    user_id INTEGER NOT NULL
+      REFERENCES users(id) ON DELETE CASCADE,
+
+    product_id INTEGER NOT NULL
+      REFERENCES products(id) ON DELETE CASCADE,
+
+    quantity INTEGER NOT NULL DEFAULT 1,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+
+    UNIQUE(user_id,product_id),
+
+    CHECK(quantity > 0)
+  )
+`);
+
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS wishlist_items (
+    id SERIAL PRIMARY KEY,
+
+    user_id INTEGER NOT NULL
+      REFERENCES users(id) ON DELETE CASCADE,
+
+    product_id INTEGER NOT NULL
+      REFERENCES products(id) ON DELETE CASCADE,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+
+    UNIQUE(user_id,product_id)
+  )
+`);
+
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS shop_orders (
+    id SERIAL PRIMARY KEY,
+
+    buyer_id INTEGER NOT NULL
+      REFERENCES users(id) ON DELETE CASCADE,
+
+    total_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+    currency VARCHAR(10) NOT NULL DEFAULT 'IRR',
+
+    status VARCHAR(30) NOT NULL DEFAULT 'pending',
+
+    shipping_name VARCHAR(200) DEFAULT '',
+    shipping_phone VARCHAR(50) DEFAULT '',
+    shipping_address TEXT DEFAULT '',
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+
+    CHECK(total_amount >= 0)
+  )
+`);
+
+
+await pool.query(`
+  CREATE INDEX IF NOT EXISTS idx_shop_orders_buyer
+  ON shop_orders(buyer_id,created_at DESC)
+`);
+
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS shop_order_items (
+    id SERIAL PRIMARY KEY,
+
+    order_id INTEGER NOT NULL
+      REFERENCES shop_orders(id) ON DELETE CASCADE,
+
+    product_id INTEGER
+      REFERENCES products(id) ON DELETE SET NULL,
+
+    seller_id INTEGER
+      REFERENCES users(id) ON DELETE SET NULL,
+
+    product_name VARCHAR(200) NOT NULL DEFAULT '',
+
+    quantity INTEGER NOT NULL DEFAULT 1,
+
+    unit_price NUMERIC(14,2) NOT NULL DEFAULT 0,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+
+    CHECK(quantity > 0),
+    CHECK(unit_price >= 0)
+  )
+`);
+
+
+await pool.query(`
+  CREATE INDEX IF NOT EXISTS idx_shop_order_items_order
+  ON shop_order_items(order_id)
+`);
+
+
+// ------------------------------------------------------------
+// SHOP HOME
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/shop"
+) {
+
+  const q =
+    (url.searchParams.get("q") || "")
+      .trim();
+
+  const category =
+    (url.searchParams.get("category") || "")
+      .trim();
+
+  const products = await pool.query(`
+    SELECT
+      p.id,
+      p.name,
+      p.description,
+      p.price,
+      p.currency,
+      p.image_url,
+      p.stock,
+      p.category,
+      p.seller_id,
+      u.name AS seller_name,
+      u.username AS seller_username
+    FROM products p
+    JOIN users u
+      ON u.id=p.seller_id
+    WHERE
+      p.active=TRUE
+      AND p.stock > 0
+      AND (
+        $1=''
+        OR LOWER(p.name) LIKE LOWER($2)
+        OR LOWER(p.description) LIKE LOWER($2)
+      )
+      AND (
+        $3=''
+        OR LOWER(p.category)=LOWER($3)
+      )
+    ORDER BY p.created_at DESC
+    LIMIT 100
+  `,[
+    q,
+    `%${q}%`,
+    category
+  ]);
+
+  sendPage(
+    res,
+    "فروشگاه",
+    `
+      <div class="card">
+        <h2>🛍️ فروشگاه MySocial</h2>
+
+        <form method="GET" action="/shop">
+
+          <input
+            name="q"
+            value="${escapeHtml(q)}"
+            placeholder="جستجوی محصول..."
+          >
+
+          <input
+            name="category"
+            value="${escapeHtml(category)}"
+            placeholder="دسته‌بندی"
+          >
+
+          <button class="btn">
+            جستجو
+          </button>
+        </form>
+
+        <p>
+          <a class="btn"
+             href="/shop-seller">
+            مدیریت محصولات من
+          </a>
+
+          <a class="btn"
+             href="/cart">
+            🛒 سبد خرید
+          </a>
+
+          <a class="btn"
+             href="/wishlist">
+            ❤️ علاقه‌مندی‌ها
+          </a>
+
+          <a class="btn"
+             href="/orders">
+            📦 سفارش‌های من
+          </a>
+        </p>
+      </div>
+
+      <div class="grid">
+
+        ${
+          products.rows.length
+          ? products.rows.map(p => `
+
+              <div class="card">
+
+                ${
+                  p.image_url
+                  ? `
+                    <img
+                      src="${escapeHtml(p.image_url)}"
+                      style="
+                        width:100%;
+                        max-height:280px;
+                        object-fit:cover;
+                        border-radius:12px;
+                      "
+                    >
+                  `
+                  : ""
+                }
+
+                <h3>
+                  ${escapeHtml(p.name)}
+                </h3>
+
+                <p>
+                  ${escapeHtml(p.description || "")}
+                </p>
+
+                <strong>
+                  ${escapeHtml(String(p.price))}
+                  ${escapeHtml(p.currency)}
+                </strong>
+
+                <p>
+                  فروشنده:
+                  ${escapeHtml(p.seller_name)}
+                </p>
+
+                <p>
+                  موجودی:
+                  ${p.stock}
+                </p>
+
+                <a
+                  class="btn"
+                  href="/product?id=${p.id}"
+                >
+                  مشاهده
+                </a>
+
+              </div>
+
+            `).join("")
+          : `
+            <div class="card">
+              <p>
+                محصولی پیدا نشد.
+              </p>
+            </div>
+          `
+        }
+
+      </div>
+    `
+  );
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// PRODUCT PAGE
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/product"
+) {
+
+  const productId =
+    Number(url.searchParams.get("id"));
+
+  if (
+    !Number.isInteger(productId) ||
+    productId <= 0
+  ) {
+
+    redirect(res,"/shop");
+    return;
+  }
+
+  const result = await pool.query(`
+    SELECT
+      p.*,
+      u.name AS seller_name,
+      u.username AS seller_username
+    FROM products p
+    JOIN users u
+      ON u.id=p.seller_id
+    WHERE p.id=$1
+      AND p.active=TRUE
+    LIMIT 1
+  `,[productId]);
+
+  if (!result.rows.length) {
+
+    redirect(res,"/shop");
+    return;
+  }
+
+  const p = result.rows[0];
+
+  sendPage(
+    res,
+    p.name,
+    `
+      <div class="card">
+
+        ${
+          p.image_url
+          ? `
+            <img
+              src="${escapeHtml(p.image_url)}"
+              style="
+                width:100%;
+                max-height:500px;
+                object-fit:contain;
+                border-radius:14px;
+              "
+            >
+          `
+          : ""
+        }
+
+        <h2>
+          ${escapeHtml(p.name)}
+        </h2>
+
+        <p>
+          ${escapeHtml(p.description || "")}
+        </p>
+
+        <h3>
+          ${escapeHtml(String(p.price))}
+          ${escapeHtml(p.currency)}
+        </h3>
+
+        <p>
+          موجودی:
+          ${p.stock}
+        </p>
+
+        <p>
+          فروشنده:
+          <a href="/profile?id=${p.seller_id}">
+            ${escapeHtml(p.seller_name)}
+          </a>
+        </p>
+
+        ${
+          p.stock > 0
+          ? `
+            <form method="POST"
+                  action="/cart-add">
+
+              <input
+                type="hidden"
+                name="product_id"
+                value="${p.id}"
+              >
+
+              <input
+                type="number"
+                name="quantity"
+                min="1"
+                max="${p.stock}"
+                value="1"
+              >
+
+              <button class="btn">
+                🛒 افزودن به سبد
+              </button>
+            </form>
+          `
+          : `
+            <p>
+              این محصول فعلاً موجود نیست.
+            </p>
+          `
+        }
+
+        <p>
+
+          <a
+            class="btn"
+            href="/wishlist-add?id=${p.id}"
+          >
+            ❤️ افزودن به علاقه‌مندی
+          </a>
+
+        </p>
+
+      </div>
+    `
+  );
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// SELLER DASHBOARD
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/shop-seller"
+) {
+
+  const products = await pool.query(`
+    SELECT
+      id,
+      name,
+      description,
+      price,
+      currency,
+      stock,
+      category,
+      active,
+      created_at
+    FROM products
+    WHERE seller_id=$1
+    ORDER BY created_at DESC
+    LIMIT 200
+  `,[user.id]);
+
+  sendPage(
+    res,
+    "مدیریت فروشگاه",
+    `
+      <div class="card">
+
+        <h2>
+          🏪 مدیریت محصولات
+        </h2>
+
+        <form method="POST"
+              action="/product-create">
+
+          <input
+            name="name"
+            placeholder="نام محصول"
+            required
+          >
+
+          <textarea
+            name="description"
+            placeholder="توضیحات محصول"
+          ></textarea>
+
+          <input
+            name="price"
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="قیمت"
+            required
+          >
+
+          <input
+            name="currency"
+            value="IRR"
+            maxlength="10"
+          >
+
+          <input
+            name="stock"
+            type="number"
+            min="0"
+            value="1"
+            placeholder="موجودی"
+          >
+
+          <input
+            name="category"
+            placeholder="دسته‌بندی"
+          >
+
+          <input
+            name="image_url"
+            placeholder="آدرس تصویر محصول"
+          >
+
+          <button class="btn">
+            ایجاد محصول
+          </button>
+
+        </form>
+      </div>
+
+      ${
+        products.rows.map(p => `
+          <div class="card">
+
+            <h3>
+              ${escapeHtml(p.name)}
+            </h3>
+
+            <p>
+              قیمت:
+              ${escapeHtml(String(p.price))}
+              ${escapeHtml(p.currency)}
+            </p>
+
+            <p>
+              موجودی:
+              ${p.stock}
+            </p>
+
+            <p>
+              وضعیت:
+              ${p.active ? "فعال" : "غیرفعال"}
+            </p>
+
+            <a
+              class="btn"
+              href="/product-edit?id=${p.id}"
+            >
+              ویرایش
+            </a>
+
+            <a
+              class="btn"
+              href="/product-toggle?id=${p.id}"
+            >
+              ${p.active ? "غیرفعال کردن" : "فعال کردن"}
+            </a>
+
+          </div>
+        `).join("")
+      }
+    `
+  );
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// CREATE PRODUCT
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/product-create"
+) {
+
+  const d = await readBody(req);
+
+  const name =
+    (d.get("name") || "").trim();
+
+  const description =
+    (d.get("description") || "").trim();
+
+  const price =
+    Number(d.get("price"));
+
+  const currency =
+    (d.get("currency") || "IRR")
+      .trim()
+      .slice(0,10);
+
+  const stock =
+    Number(d.get("stock"));
+
+  const category =
+    (d.get("category") || "")
+      .trim()
+      .slice(0,100);
+
+  let imageUrl =
+    (d.get("image_url") || "").trim();
+
+  if (!name ||
+      !Number.isFinite(price) ||
+      price < 0 ||
+      !Number.isInteger(stock) ||
+      stock < 0) {
+
+    redirect(res,"/shop-seller");
+    return;
+  }
+
+  if (imageUrl) {
+
+    const safe = safeUrl(imageUrl);
+
+    if (!safe) {
+      imageUrl = "";
+    } else {
+      imageUrl = safe;
+    }
+  }
+
+  await pool.query(`
+    INSERT INTO products(
+      seller_id,
+      name,
+      description,
+      price,
+      currency,
+      image_url,   user.id,
     name.slice(0,200),
     description.slice(0,5000),
     price,
@@ -14240,7 +12168,6 @@ if (
   ]);
 
   if (!result.rows.length) {
-
     redirect(res,"/shop-seller");
     return;
   }
@@ -14517,102 +12444,7 @@ if (
   return;
 }
 
-
-// ------------------------------------------------------------
-// CART
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/cart"
-) {
-
-  const rows = await pool.query(`
-    SELECT
-      c.id,
-      c.quantity,
-      p.id AS product_id,
-      p.name,
-      p.price,
-      p.currency,
-      p.stock,
-      p.active,
-      (c.quantity*p.price) AS subtotal
-    FROM cart_items c
-    JOIN products p
-      ON p.id=c.product_id
-    WHERE c.user_id=$1
-    ORDER BY c.created_at DESC
-  `,[user.id]);
-
-  const total =
-    rows.rows.reduce(
-      (sum,r) =>
-        sum + Number(r.subtotal || 0),
-      0
-    );
-
-  sendPage(
-    res,
-    "سبد خرید",
-    `
-      <div class="card">
-
-        <h2>
-          🛒 سبد خرید
-        </h2>
-
-        ${
-          rows.rows.length
-          ? rows.rows.map(r => `
-
-              <div class="card">
-
-                <h3>
-                  ${escapeHtml(r.name)}
-                </h3>
-
-                <p>
-                  تعداد:
-                  ${r.quantity}
-                </p>
-
-                <p>
-                  قیمت:
-                  ${escapeHtml(String(r.price))}
-                  ${escapeHtml(r.currency)}
-                </p>
-
-                <p>
-                  مجموع:
-                  ${escapeHtml(String(r.subtotal))}
-                  ${escapeHtml(r.currency)}
-                </p>
-
-                <form
-                  method="POST"
-                  action="/cart-update"
-                >
-
-                  <input
-                    type="hidden"
-                    name="product_id"
-                    value="${r.product_id}"
-                  >
-
-                  <input
-                    type="num// ============================================================
-// SECTION 19
-// SHOP ADVANCED
-// SELLER ORDERS / ORDER MANAGEMENT / REVIEWS
-// PRODUCT REVIEWS / RATINGS / COUPONS
-// ============================================================
-
-
-// ------------------------------------------------------------
-// PRODUCT REVIEWS
-// ------------------------------------------------------------
-
+/* EXTRA FEATURE SECTION 19 */
 await pool.query(`
   CREATE TABLE IF NOT EXISTS product_reviews (
     id SERIAL PRIMARY KEY,
@@ -15292,6 +13124,11 @@ if (
     ),
     orders:Number(
       sales.rows[0].orders || 0
+    ),     products:Number(
+      products.rows[0].count || 0
+    ),
+    orders:Number(
+      sales.rows[0].orders || 0
     ),
     revenue:Number(
       sales.rows[0].revenue || 0
@@ -15306,98 +13143,287 @@ if (
 
 
 // ------------------------------------------------------------
-// PRODUCT SEARCH API
+// CART PAGE
 // ------------------------------------------------------------
 
 if (
   req.method === "GET" &&
-  path === "/api/shop/search"
+  path === "/cart"
 ) {
-
-  const q =
-    (url.searchParams.get("q") || "")
-      .trim();
-
-  const category =
-    (url.searchParams.get("category") || "")
-      .trim();
-
-  const minPrice =
-    Number(url.searchParams.get("min"));
-
-  const maxPrice =
-    Number(url.searchParams.get("max"));
 
   const rows = await pool.query(`
     SELECT
-      p.id,
+      c.id,
+      c.quantity,
+      p.id AS product_id,
       p.name,
-      p.description,
       p.price,
       p.currency,
       p.image_url,
       p.stock,
-      p.category,
-      p.seller_id,
+      p.active,
       u.name AS seller_name
-    FROM products p
+    FROM cart_items c
+    JOIN products p
+      ON p.id=c.product_id
     JOIN users u
       ON u.id=p.seller_id
-    WHERE
-      p.active=TRUE
-      AND p.stock>0
+    WHERE c.user_id=$1
+    ORDER BY c.created_at DESC
+  `,[user.id]);
 
-      AND (
-        $1=''
-        OR LOWER(p.name) LIKE LOWER($2)
-        OR LOWER(p.description) LIKE LOWER($2)
-      )
+  let total = 0;
 
-      AND (
-        $3=''
-        OR LOWER(p.category)=LOWER($3)
-      )
-
-      AND (
-        $4 IS NULL
-        OR p.price >= $4
-      )
-
-      AND (
-        $5 IS NULL
-        OR p.price <= $5
-      )
-
-    ORDER BY p.created_at DESC
-    LIMIT 100
-  `,[
-    q,
-    `%${q}%`,
-    category,
-    Number.isFinite(minPrice)
-      ? minPrice
-      : null,
-    Number.isFinite(maxPrice)
-      ? maxPrice
-      : null
-  ]);
-
-  sendJson(res,{
-    ok:true,
-    products:rows.rows
+  rows.rows.forEach(item => {
+    total += Number(item.price) * Number(item.quantity);
   });
+
+  sendPage(
+    res,
+    "سبد خرید",
+    `
+      <div class="card">
+
+        <h2>🛒 سبد خرید</h2>
+
+        ${
+          rows.rows.length
+          ? rows.rows.map(item => {
+
+              const subtotal =
+                Number(item.price) *
+                Number(item.quantity);
+
+              return `
+                <div class="card">
+
+                  <h3>
+                    ${escapeHtml(item.name)}
+                  </h3>
+
+                  ${
+                    item.image_url
+                    ? `
+                      <img
+                        class="post-image"
+                        src="${escapeHtml(item.image_url)}"
+                      >
+                    `
+                    : ""
+                  }
+
+                  <p>
+                    فروشنده:
+                    ${escapeHtml(item.seller_name)}
+                  </p>
+
+                  <p>
+                    قیمت:
+                    ${escapeHtml(String(item.price))}
+                    ${escapeHtml(item.currency)}
+                  </p>
+
+                  <p>
+                    تعداد:
+                    ${item.quantity}
+                  </p>
+
+                  <p>
+                    جمع:
+                    ${subtotal}
+                    ${escapeHtml(item.currency)}
+                  </p>
+
+                  <form
+                    method="POST"
+                    action="/cart-update"
+                  >
+
+                    <input
+                      type="hidden"
+                      name="product_id"
+                      value="${item.product_id}"
+                    >
+
+                    <input
+                      type="number"
+                      name="quantity"
+                      min="0"
+                      max="${item.stock}"
+                      value="${item.quantity}"
+                    >
+
+                    <button class="btn">
+                      بروزرسانی
+                    </button>
+
+                  </form>
+
+                  <form
+                    method="POST"
+                    action="/cart-remove"
+                  >
+
+                    <input
+                      type="hidden"
+                      name="product_id"
+                      value="${item.product_id}"
+                    >
+
+                    <button class="btn danger">
+                      حذف
+                    </button>
+
+                  </form>
+
+                </div>
+              `;
+            }).join("")
+          : `
+            <div class="empty">
+              سبد خرید شما خالی است.
+            </div>
+          `
+        }
+
+        ${
+          rows.rows.length
+          ? `
+            <hr>
+
+            <h3>
+              مجموع:
+              ${total}
+              ${escapeHtml(
+                rows.rows[0].currency || "IRR"
+              )}
+            </h3>
+
+            <a href="/checkout">
+              <button class="btn full">
+                ادامه و ثبت سفارش
+              </button>
+            </a>
+          `
+          : ""
+        }
+
+      </div>
+    `
+  );
 
   return;
 }
 
 
 // ------------------------------------------------------------
-// REMOVE PRODUCT FROM WISHLIST API
+// UPDATE CART
 // ------------------------------------------------------------
 
 if (
   req.method === "POST" &&
-  path === "/api/shop/wishlist/remove"
+  path === "/cart-update"
+) {
+
+  const d = await readBody(req);
+
+  const productId =
+    Number(d.get("product_id"));
+
+  let quantity =
+    Number(d.get("quantity"));
+
+  if (
+    !Number.isInteger(productId) ||
+    productId <= 0
+  ) {
+    redirect(res,"/cart");
+    return;
+  }
+
+  if (
+    !Number.isInteger(quantity) ||
+    quantity < 0
+  ) {
+    quantity = 1;
+  }
+
+  if (quantity === 0) {
+
+    await pool.query(`
+      DELETE FROM cart_items
+      WHERE
+        user_id=$1
+        AND product_id=$2
+    `,[
+      user.id,
+      productId
+    ]);
+
+    redirect(res,"/cart");
+    return;
+  }
+
+  const product =
+    await pool.query(`
+      SELECT stock,active
+      FROM products
+      WHERE id=$1
+      LIMIT 1
+    `,[productId]);
+
+  if (
+    !product.rows.length ||
+    !product.rows[0].active ||
+    product.rows[0].stock < 1
+  ) {
+
+    await pool.query(`
+      DELETE FROM cart_items
+      WHERE
+        user_id=$1
+        AND product_id=$2
+    `,[
+      user.id,
+      productId
+    ]);
+
+    redirect(res,"/cart");
+    return;
+  }
+
+  quantity = Math.min(
+    quantity,
+    product.rows[0].stock
+  );
+
+  await pool.query(`
+    UPDATE cart_items
+    SET
+      quantity=$1,
+      updated_at=NOW()
+    WHERE
+      user_id=$2
+      AND product_id=$3
+  `,[
+    quantity,
+    user.id,
+    productId
+  ]);
+
+  redirect(res,"/cart");
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// REMOVE CART ITEM
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/cart-remove"
 ) {
 
   const d = await readBody(req);
@@ -15406,363 +13432,24 @@ if (
     Number(d.get("product_id"));
 
   if (
-    !Number.isInteger(productId) ||
-    productId <= 0
+    Number.isInteger(productId) &&
+    productId > 0
   ) {
 
-    sendJson(res,{
-      ok:false,
-      error:"invalid_product"
-    },400);
-
-    return;
+    await pool.query(`
+      DELETE FROM cart_items
+      WHERE
+        user_id=$1
+        AND product_id=$2
+    `,[
+      user.id,
+      productId
+    ]);
   }
 
-  await pool.query(`
-    DELETE FROM wishlist_items
-    WHERE
-      user_id=$1
-      AND product_id=$2
-  `,[
-    user.id,
-    productId
-  ]);
-
-  sendJson(res,{
-    ok:true
-  });
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// SHOP SUMMARY
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/api/shop/summary"
-) {
-
-  const cart = await pool.query(`
-    SELECT
-      COALESCE(SUM(quantity),0) AS items
-    FROM cart_items
-    WHERE user_id=$1
-  `,[user.id]);
-
-  const wishlist = await pool.query(`
-    SELECT
-      COUNT(*) AS count
-    FROM wishlist_items
-    WHERE user_id=$1
-  `,[user.id]);
-
-  const orders = await pool.query(`
-    SELECT
-      COUNT(*) AS count
-    FROM shop_orders
-    WHERE buyer_id=$1
-  `,[user.id]);
-
-  sendJson(res,{
-    ok:true,
-    cart_items:Number(
-      cart.rows[0].items || 0
-    ),
-    wishlist:Number(
-      wishlist.rows[0].count || 0
-    ),
-    orders:Number(
-      orders.rows[0].count || 0
-    )
-  });
-
-  return;
-    }// ============================================================
-// SECTION 20
-// ADMIN PANEL / MODERATION / USER MANAGEMENT
-// REPORT MANAGEMENT / CONTENT CONTROL / SYSTEM SETTINGS
-// ============================================================
-
-
-// ------------------------------------------------------------
-// ADMIN TABLES
-// ------------------------------------------------------------
-
-await pool.query(`
-  ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS role VARCHAR(30)
-  DEFAULT 'user'
-`);
-
-await pool.query(`
-  ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS is_active BOOLEAN
-  DEFAULT TRUE
-`);
-
-await pool.query(`
-  ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS is_verified BOOLEAN
-  DEFAULT FALSE
-`);
-
-await pool.query(`
-  ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS suspended_until TIMESTAMP
-  DEFAULT NULL
-`);
-
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS admin_actions (
-    id SERIAL PRIMARY KEY,
-
-    admin_id INTEGER NOT NULL
-      REFERENCES users(id) ON DELETE CASCADE,
-
-    target_user_id INTEGER
-      REFERENCES users(id) ON DELETE SET NULL,
-
-    action VARCHAR(100) NOT NULL,
-    target_type VARCHAR(50) DEFAULT '',
-    target_id INTEGER DEFAULT NULL,
-
-    details TEXT DEFAULT '',
-
-    created_at TIMESTAMP DEFAULT NOW()
-  )
-`);
-
-await pool.query(`
-  CREATE INDEX IF NOT EXISTS idx_admin_actions_admin
-  ON admin_actions(admin_id,created_at DESC)
-`);
-
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS system_settings (
-    id SERIAL PRIMARY KEY,
-
-    setting_key VARCHAR(100) NOT NULL UNIQUE,
-    setting_value TEXT DEFAULT '',
-
-    updated_at TIMESTAMP DEFAULT NOW()
-  )
-`);
-
-
-// ------------------------------------------------------------
-// ADMIN CHECK
-// ------------------------------------------------------------
-
-async function isAdmin(userId) {
-
-  if (!userId) {
-    return false;
-  }
-
-  const result = await pool.query(`
-    SELECT role
-    FROM users
-    WHERE id=$1
-      AND is_active=TRUE
-    LIMIT 1
-  `,[userId]);
-
-  if (!result.rows.length) {
-    return false;
-  }
-
-  return [
-    "admin",
-    "superadmin"
-  ].includes(result.rows[0].role);
-}
-
-
-// ------------------------------------------------------------
-// ADMIN ACTION LOGGER
-// ------------------------------------------------------------
-
-async function logAdminAction(
-  adminId,
-  action,
-  targetUserId = null,
-  targetType = "",
-  targetId = null,
-  details = ""
-) {
-
-  await pool.query(`
-    INSERT INTO admin_actions(
-      admin_id,
-      target_user_id,
-      action,
-      target_type,
-      target_id,
-      details
-    )
-    VALUES($1,$2,$3,$4,$5,$6)
-  `,[
-    adminId,
-    targetUserId,
-    action,
-    targetType,
-    targetId,
-    details
-  ]);
-}
-
-
-// ------------------------------------------------------------
-// ADMIN DASHBOARD
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/admin"
-) {
-
-  if (!(await isAdmin(user.id))) {
-
-    res.writeHead(403,{
-      "Content-Type":"text/html; charset=utf-8"
-    });
-
-    res.end(`
-      <h2 style="font-family:Arial">
-        دسترسی غیرمجاز
-      </h2>
-    `);
-
-    return;
-  }
-
-  const users = await pool.query(`
-    SELECT COUNT(*) AS count
-    FROM users
-  `);
-
-  const activeUsers = await pool.query(`
-    SELECT COUNT(*) AS count
-    FROM users
-    WHERE is_active=TRUE
-  `);
-
-  const posts = await pool.query(`
-    SELECT COUNT(*) AS count
-    FROM posts
-  `);
-
-  const reports = await pool.query(`
-    SELECT COUNT(*) AS count
-    FROM reports
-  `);
-
-  const pendingReports = await pool.query(`
-    SELECT COUNT(*) AS count
-    FROM reports
-    WHERE status='pending'
-  `);
-
-  const products = await pool.query(`
-    SELECT COUNT(*) AS count
-    FROM products
-  `);
-
-  const orders = await pool.query(`
-    SELECT COUNT(*) AS count
-    FROM shop_orders
-  `);
-
-  sendPage(
+  redirect(
     res,
-    "پنل مدیریت",
-    `
-      <div class="card">
-
-        <h2>
-          🛡️ پنل مدیریت MySocial
-        </h2>
-
-        <div class="grid">
-
-          <div class="card">
-            <h3>👥 کاربران</h3>
-            <strong>
-              ${users.rows[0].count}
-            </strong>
-          </div>
-
-          <div class="card">
-            <h3>🟢 کاربران فعال</h3>
-            <strong>
-              ${activeUsers.rows[0].count}
-            </strong>
-          </div>
-
-          <div class="card">
-            <h3>📝 پست‌ها</h3>
-            <strong>
-              ${posts.rows[0].count}
-            </strong>
-          </div>
-
-          <div class="card">
-            <h3>🚨 گزارش‌ها</h3>
-            <strong>
-              ${reports.rows[0].count}
-            </strong>
-          </div>
-
-          <div class="card">
-            <h3>⏳ گزارش‌های در انتظار</h3>
-            <strong>
-              ${pendingReports.rows[0].count}
-            </strong>
-          </div>
-
-          <div class="card">
-            <h3>🛍️ محصولات</h3>
-            <strong>
-              ${products.rows[0].count}
-            </strong>
-          </div>
-
-          <div class="card">
-            <h3>📦 سفارش‌ها</h3>
-            <strong>
-              ${orders.rows[0].count}
-            </strong>
-          </div>
-
-        </div>
-
-        <p>
-          <a class="btn" href="/admin-users">
-            مدیریت کاربران
-          </a>
-
-          <a class="btn" href="/admin-reports">
-            مدیریت گزارش‌ها
-          </a>
-
-          <a class="btn" href="/admin-posts">
-            مدیریت پست‌ها
-          </a>
-
-          <a class="btn" href="/admin-actions">
-            گزارش فعالیت مدیران
-          </a>
-
-          <a class="btn" href="/admin-settings">
-            تنظیمات سیستم
-          </a>
-        </p>
-
-      </div>
-    `
+    "/cart"
   );
 
   return;
@@ -15770,1066 +13457,118 @@ if (
 
 
 // ------------------------------------------------------------
-// ADMIN USERS
+// WISHLIST PAGE
 // ------------------------------------------------------------
 
 if (
   req.method === "GET" &&
-  path === "/admin-users"
+  path === "/wishlist"
 ) {
-
-  if (!(await isAdmin(user.id))) {
-
-    sendJson(res,{
-      ok:false,
-      error:"forbidden"
-    },403);
-
-    return;
-  }
-
-  const q =
-    (url.searchParams.get("q") || "")
-      .trim();
 
   const rows = await pool.query(`
     SELECT
-      id,
-      name,
-      username,
-      email,
-      role,
-      is_active,
-      is_verified,
-      suspended_until,
-      created_at
-    FROM users
-    WHERE
-      $1=''
-      OR LOWER(name) LIKE LOWER($2)
-      OR LOWER(username) LIKE LOWER($2)
-      OR LOWER(email) LIKE LOWER($2)
-    ORDER BY id DESC
-    LIMIT 200
-  `,[
-    q,
-    `%${q}%`
-  ]);
-
-  sendPage(
-    res,
-    "مدیریت کاربران",
-    `
-      <div class="card">
-
-        <h2>
-          👥 مدیریت کاربران
-        </h2>
-
-        <form method="GET"
-              action="/admin-users">
-
-          <input
-            name="q"
-            value="${escapeHtml(q)}"
-            placeholder="جستجوی کاربر..."
-          >
-
-          <button class="btn">
-            جستجو
-          </button>
-
-        </form>
-
-      </div>
-
-      ${
-        rows.rows.map(u => `
-
-          <div class="card">
-
-            <h3>
-              ${escapeHtml(u.name)}
-            </h3>
-
-            <p>
-              @${escapeHtml(u.username || "")}
-            </p>
-
-            <p>
-              ID:
-              ${u.id}
-            </p>
-
-            <p>
-              نقش:
-              ${escapeHtml(u.role || "user")}
-            </p>
-
-            <p>
-              وضعیت:
-              ${u.is_active ? "فعال" : "غیرفعال"}
-            </p>
-
-            <p>
-              تأیید:
-              ${u.is_verified ? "تأیید شده" : "تأیید نشده"}
-            </p>
-
-            <p>
-
-              <a
-                class="btn"
-                href="/admin-user?id=${u.id}"
-              >
-                مدیریت
-              </a>
-
-            </p>
-
-          </div>
-
-        `).join("")
-      }
-    `
-  );
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// ADMIN USER PAGE
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/admin-user"
-) {
-
-  if (!(await isAdmin(user.id))) {
-
-    sendJson(res,{
-      ok:false,
-      error:"forbidden"
-    },403);
-
-    return;
-  }
-
-  const targetId =
-    Number(url.searchParams.get("id"));
-
-  const result = await pool.query(`
-    SELECT
-      id,
-      name,
-      username,
-      email,
-      role,
-      is_active,
-      is_verified,
-      suspended_until,
-      created_at
-    FROM users
-    WHERE id=$1
-    LIMIT 1
-  `,[targetId]);
-
-  if (!result.rows.length) {
-
-    redirect(res,"/admin-users");
-    return;
-  }
-
-  const u = result.rows[0];
-
-  sendPage(
-    res,
-    "مدیریت کاربر",
-    `
-      <div class="card">
-
-        <h2>
-          🛡️ مدیریت کاربر
-        </h2>
-
-        <p>
-          نام:
-          ${escapeHtml(u.name)}
-        </p>
-
-        <p>
-          نام کاربری:
-          @${escapeHtml(u.username || "")}
-        </p>
-
-        <p>
-          ایمیل:
-          ${escapeHtml(u.email || "")}
-        </p>
-
-        <p>
-          نقش:
-          ${escapeHtml(u.role || "user")}
-        </p>
-
-        <p>
-          وضعیت:
-          ${u.is_active ? "فعال" : "غیرفعال"}
-        </p>
-
-        <p>
-          تأیید:
-          ${u.is_verified ? "تأیید شده" : "تأیید نشده"}
-        </p>
-
-        <hr>
-
-        <form method="POST"
-              action="/admin-user-role">
-
-          <input
-            type="hidden"
-            name="user_id"
-            value="${u.id}"
-          >
-
-          <select name="role">
-
-            <option value="user">
-              کاربر عادی
-            </option>
-
-            <option value="creator">
-              Creator
-            </option>
-
-            <option value="business">
-              Business
-            </option>
-
-            <option value="moderator">
-              Moderator
-            </option>
-
-            <option value="admin">
-              Admin
-            </option>
-
-          </select>
-
-          <button class="btn">
-            تغییر نقش
-          </button>
-
-        </form>
-
-        <p>
-
-          <a
-            class="btn"
-            href="/admin-user-toggle?id=${u.id}"
-          >
-            ${u.is_active
-              ? "غیرفعال کردن حساب"
-              : "فعال کردن حساب"}
-          </a>
-
-          <a
-            class="btn"
-            href="/admin-user-verify?id=${u.id}"
-          >
-            ${u.is_verified
-              ? "لغو تأیید"
-              : "تأیید حساب"}
-          </a>
-
-        </p>
-
-        <form method="POST"
-              action="/admin-suspend">
-
-          <input
-            type="hidden"
-            name="user_id"
-            value="${u.id}"
-          >
-
-          <select name="hours">
-
-            <option value="1">
-              ۱ ساعت
-            </option>
-
-            <option value="24">
-              ۲۴ ساعت
-            </option>
-
-            <option value="72">
-              ۳ روز
-            </option>
-
-            <option value="168">
-              ۷ روز
-            </option>
-
-          </select>
-
-          <button class="btn">
-            تعلیق موقت
-          </button>
-
-        </form>
-
-        <p>
-
-          <a
-            class="btn"
-            href="/admin-unsuspend?id=${u.id}"
-          >
-            لغو تعلیق
-          </a>
-
-        </p>
-
-      </div>
-    `
-  );
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// CHANGE USER ROLE
-// ------------------------------------------------------------
-
-if (
-  req.method === "POST" &&
-  path === "/admin-user-role"
-) {
-
-  if (!(await isAdmin(user.id))) {
-
-    sendJson(res,{
-      ok:false,
-      error:"forbidden"
-    },403);
-
-    return;
-  }
-
-  const d = await readBody(req);
-
-  const targetId =
-    Number(d.get("user_id"));
-
-  const role =
-    (d.get("role") || "user").trim();
-
-  const allowedRoles = [
-    "user",
-    "creator",
-    "business",
-    "moderator",
-    "admin"
-  ];
-
-  if (
-    !Number.isInteger(targetId) ||
-    targetId <= 0 ||
-    !allowedRoles.includes(role)
-  ) {
-
-    redirect(res,"/admin-users");
-    return;
-  }
-
-  if (
-    targetId === user.id &&
-    role !== "admin"
-  ) {
-
-    redirect(
-      res,
-      `/admin-user?id=${targetId}`
-    );
-
-    return;
-  }
-
-  await pool.query(`
-    UPDATE users
-    SET role=$1
-    WHERE id=$2
-  `,[
-    role,
-    targetId
-  ]);
-
-  await logAdminAction(
-    user.id,
-    "change_role",
-    targetId,
-    "user",
-    targetId,
-    `role=${role}`
-  );
-
-  redirect(
-    res,
-    `/admin-user?id=${targetId}`
-  );
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// TOGGLE USER
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/admin-user-toggle"
-) {
-
-  if (!(await isAdmin(user.id))) {
-
-    sendJson(res,{
-      ok:false,
-      error:"forbidden"
-    },403);
-
-    return;
-  }
-
-  const targetId =
-    Number(url.searchParams.get("id"));
-
-  if (
-    !Number.isInteger(targetId) ||
-    targetId <= 0 ||
-    targetId === user.id
-  ) {
-
-    redirect(res,"/admin-users");
-    return;
-  }
-
-  await pool.query(`
-    UPDATE users
-    SET is_active=NOT is_active
-    WHERE id=$1
-  `,[targetId]);
-
-  await logAdminAction(
-    user.id,
-    "toggle_user",
-    targetId,
-    "user",
-    targetId
-  );
-
-  redirect(
-    res,
-    `/admin-user?id=${targetId}`
-  );
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// VERIFY USER
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/admin-user-verify"
-) {
-
-  if (!(await isAdmin(user.id))) {
-
-    sendJson(res,{
-      ok:false,
-      error:"forbidden"
-    },403);
-
-    return;
-  }
-
-  const targetId =
-    Number(url.searchParams.get("id"));
-
-  await pool.query(`
-    UPDATE users
-    SET is_verified=NOT is_verified
-    WHERE id=$1
-  `,[targetId]);
-
-  await logAdminAction(
-    user.id,
-    "toggle_verification",
-    targetId,
-    "user",
-    targetId
-  );
-
-  redirect(
-    res,
-    `/admin-user?id=${targetId}`
-  );
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// SUSPEND USER
-// ------------------------------------------------------------
-
-if (
-  req.method === "POST" &&
-  path === "/admin-suspend"
-) {
-
-  if (!(await isAdmin(user.id))) {
-
-    sendJson(res,{
-      ok:false,
-      error:"forbidden"
-    },403);
-
-    return;
-  }
-
-  const d = await readBody(req);
-
-  const targetId =
-    Number(d.get("user_id"));
-
-  const hours =
-    Number(d.get("hours"));
-
-  const allowedHours = [
-    1,
-    24,
-    72,
-    168
-  ];
-
-  if (
-    !Number.isInteger(targetId) ||
-    !allowedHours.includes(hours) ||
-    targetId === user.id
-  ) {
-
-    redirect(res,"/admin-users");
-    return;
-  }
-
-  await pool.query(`
-    UPDATE users
-    SET suspended_until=
-      NOW() + ($1 * INTERVAL '1 hour')
-    WHERE id=$2
-  `,[
-    hours,
-    targetId
-  ]);
-
-  await logAdminAction(
-    user.id,
-    "suspend_user",
-    targetId,
-    "user",
-    targetId,
-    `hours=${hours}`
-  );
-
-  redirect(
-    res,
-    `/admin-user?id=${targetId}`
-  );
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// UNSUSPEND USER
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/admin-unsuspend"
-) {
-
-  if (!(await isAdmin(user.id))) {
-
-    sendJson(res,{
-      ok:false,
-      error:"forbidden"
-    },403);
-
-    return;
-  }
-
-  const targetId =
-    Number(url.searchParams.get("id"));
-
-  await pool.query(`
-    UPDATE users
-    SET suspended_until=NULL
-    WHERE id=$1
-  `,[targetId]);
-
-  await logAdminAction(
-    user.id,
-    "unsuspend_user",
-    targetId,
-    "user",
-    targetId
-  );
-
-  redirect(
-    res,
-    `/admin-user?id=${targetId}`
-  );
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// ADMIN REPORTS
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/admin-reports"
-) {
-
-  if (!(await isAdmin(user.id))) {
-
-    sendJson(res,{
-      ok:false,
-      error:"forbidden"
-    },403);
-
-    return;
-  }
-
-  const status =
-    (url.searchParams.get("status") || "pending")
-      .trim();
-
-  const rows = await pool.query(`
-    SELECT
-      r.id,
-      r.reporter_id,
-      r.target_id,
-      r.target_type,
-      r.reason,
-      r.status,
-      r.created_at,
-      u.name AS reporter_name
-    FROM reports r
-    LEFT JOIN users u
-      ON u.id=r.reporter_id
-    WHERE
-      $1=''
-      OR r.status=$1
-    ORDER BY r.created_at DESC
-    LIMIT 200
-  `,[status]);
-
-  sendPage(
-    res,
-    "مدیریت گزارش‌ها",
-    `
-      <div class="card">
-
-        <h2>
-          🚨 گزارش‌های کاربران
-        </h2>
-
-        <p>
-
-          <a
-            class="btn"
-            href="/admin-reports?status=pending"
-          >
-            در انتظار
-          </a>
-
-          <a
-            class="btn"
-            href="/admin-reports?status=resolved"
-          >
-            رسیدگی شده
-          </a>
-
-          <a
-            class="btn"
-            href="/admin-reports?status=rejected"
-          >
-            رد شده
-          </a>
-
-        </p>
-
-      </div>
-
-      ${
-        rows.rows.map(r => `
-
-          <div class="card">
-
-            <h3>
-              گزارش #${r.id}
-            </h3>
-
-            <p>
-              گزارش‌دهنده:
-              ${escapeHtml(r.reporter_name || "کاربر")}
-            </p>
-
-            <p>
-              نوع:
-              ${escapeHtml(r.target_type || "")}
-            </p>
-
-            <p>
-              شناسه هدف:
-              ${r.target_id || ""}
-            </p>
-
-            <p>
-              دلیل:
-              ${escapeHtml(r.reason || "")}
-            </p>
-
-            <p>
-              وضعیت:
-              ${escapeHtml(r.status || "pending")}
-            </p>
-
-            <a
-              class="btn"
-              href="/admin-report?id=${r.id}"
-            >
-              بررسی گزارش
-            </a>
-
-          </div>
-
-        `).join("")
-      }
-    `
-  );
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// ADMIN REPORT ACTION
-// ------------------------------------------------------------
-
-if (
-  req.method === "POST" &&
-  path === "/admin-report-action"
-) {
-
-  if (!(await isAdmin(user.id))) {
-
-    sendJson(res,{
-      ok:false,
-      error:"forbidden"
-    },403);
-
-    return;
-  }
-
-  const d = await readBody(req);
-
-  const reportId =
-    Number(d.get("report_id"));
-
-  const status =
-    (d.get("status") || "").trim();
-
-  const allowed = [
-    "pending",
-    "resolved",
-    "rejected"
-  ];
-
-  if (
-    !Number.isInteger(reportId) ||
-    reportId <= 0 ||
-    !allowed.includes(status)
-  ) {
-
-    redirect(
-      res,
-      "/admin-reports"
-    );
-
-    return;
-  }
-
-  const report = await pool.query(`
-    SELECT
-      id,
-      target_id,
-      target_type
-    FROM reports
-    WHERE id=$1
-    LIMIT 1
-  `,[reportId]);
-
-  if (!report.rows.length) {
-
-    redirect(
-      res,
-      "/admin-reports"
-    );
-
-    return;
-  }
-
-  await pool.query(`
-    UPDATE reports
-    SET status=$1
-    WHERE id=$2
-  `,[
-    status,
-    reportId
-  ]);
-
-  await logAdminAction(
-    user.id,
-    `report_${status}`,
-    null,
-    report.rows[0].target_type || "report",
-    report.rows[0].target_id || null,
-    `report_id=${reportId}`
-  );
-
-  redirect(
-    res,
-    `/admin-reports?status=${status}`
-  );
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// ADMIN ACTIONS
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/admin-actions"
-) {
-
-  if (!(await isAdmin(user.id))) {
-
-    sendJson(res,{
-      ok:false,
-      error:"forbidden"
-    },403);
-
-    return;
-  }
-
-  const rows = await pool.query(`
-    SELECT
-      a.id,
-      a.action,
-      a.target_type,
-      a.target_id,
-      a.details,
-      a.created_at,
-      u.name AS admin_name
-    FROM admin_actions a
+      w.id,
+      p.id AS product_id,
+      p.name,
+      p.description,
+      p.price,
+      p.currency,
+      p.image_url,
+      p.stock,
+      p.active,
+      u.name AS seller_name
+    FROM wishlist_items w
+    JOIN products p
+      ON p.id=w.product_id
     JOIN users u
-      ON u.id=a.admin_id
-    ORDER BY a.created_at DESC
-    LIMIT 300
-  `);
+      ON u.id=p.seller_id
+    WHERE w.user_id=$1
+    ORDER BY w.created_at DESC
+  `,[user.id]);
 
   sendPage(
     res,
-    "فعالیت مدیران",
+    "علاقه‌مندی‌ها",
     `
       <div class="card">
 
         <h2>
-          📋 فعالیت مدیران
+          ❤️ محصولات مورد علاقه
         </h2>
 
         ${
-          rows.rows.map(a => `
+          rows.rows.length
+          ? rows.rows.map(p => `
+              <div class="card">
 
-            <div class="card">// ============================================================
-// SECTION 21
-// ADMIN ADVANCED MODERATION
-// CONTENT REVIEW / USER SUSPENSION / REPORT ACTIONS
-// COMMENTS / REELS / STORIES / LIVE / SHOP MODERATION
-// ============================================================
+                <h3>
+                  ${escapeHtml(p.name)}
+                </h3>
 
+                ${
+                  p.image_url
+                  ? `
+                    <img
+                      class="post-image"
+                      src="${escapeHtml(p.image_url)}"
+                    >
+                  `
+                  : ""
+                }
 
-// ------------------------------------------------------------
-// MODERATION TABLES
-// ------------------------------------------------------------
+                <p>
+                  ${escapeHtml(
+                    p.description || ""
+                  )}
+                </p>
 
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS moderation_queue (
-    id SERIAL PRIMARY KEY,
+                <p>
+                  ${escapeHtml(String(p.price))}
+                  ${escapeHtml(p.currency)}
+                </p>
 
-    target_type VARCHAR(40) NOT NULL,
-    target_id INTEGER NOT NULL,
+                <p>
+                  فروشنده:
+                  ${escapeHtml(p.seller_name)}
+                </p>
 
-    reason VARCHAR(255) DEFAULT '',
-    priority INTEGER DEFAULT 0,
+                <div class="actions">
 
-    status VARCHAR(30) DEFAULT 'pending',
+                  <a
+                    href="/product?id=${p.product_id}"
+                  >
+                    <button>
+                      مشاهده محصول
+                    </button>
+                  </a>
 
-    assigned_to INTEGER
-      REFERENCES users(id)
-      ON DELETE SET NULL,
+                  <form
+                    method="POST"
+                    action="/wishlist-remove"
+                  >
 
-    created_at TIMESTAMP DEFAULT NOW(),
-    reviewed_at TIMESTAMP DEFAULT NULL
-  )
-`);
+                    <input
+                      type="hidden"
+                      name="product_id"
+                      value="${p.product_id}"
+                    >
 
-await pool.query(`
-  CREATE INDEX IF NOT EXISTS idx_moderation_queue_status
-  ON moderation_queue(status,priority DESC,created_at DESC)
-`);
+                    <button class="danger">
+                      حذف از علاقه‌مندی
+                    </button>
 
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS content_actions (
-    id SERIAL PRIMARY KEY,
+                  </form>
 
-    admin_id INTEGER
-      REFERENCES users(id)
-      ON DELETE SET NULL,
+                </div>
 
-    target_type VARCHAR(40) NOT NULL,
-    target_id INTEGER NOT NULL,
-
-    action VARCHAR(50) NOT NULL,
-
-    reason TEXT DEFAULT '',
-
-    created_at TIMESTAMP DEFAULT NOW()
-  )
-`);
-
-await pool.query(`
-  CREATE INDEX IF NOT EXISTS idx_content_actions_target
-  ON content_actions(target_type,target_id,created_at DESC)
-`);
-
-
-// ------------------------------------------------------------
-// ADMIN MODERATION DASHBOARD
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/admin-moderation"
-) {
-
-  if (!(await isAdmin(user.id))) {
-
-    sendJson(res,{
-      ok:false,
-      error:"forbidden"
-    },403);
-
-    return;
-  }
-
-  const pending = await pool.query(`
-    SELECT COUNT(*) AS count
-    FROM moderation_queue
-    WHERE status='pending'
-  `);
-
-  const reports = await pool.query(`
-    SELECT COUNT(*) AS count
-    FROM reports
-    WHERE status='pending'
-  `);
-
-  const suspended = await pool.query(`
-    SELECT COUNT(*) AS count
-    FROM users
-    WHERE suspended_until IS NOT NULL
-      AND suspended_until > NOW()
-  `);
-
-  sendPage(
-    res,
-    "مرکز نظارت",
-    `
-      <div class="card">
-
-        <h2>
-          🛡️ مرکز نظارت MySocial
-        </h2>
-
-        <div class="grid">
-
-          <div class="card">
-            <h3>⏳ صف بررسی</h3>
-            <strong>
-              ${pending.rows[0].count}
-            </strong>
-          </div>
-
-          <div class="card">
-            <h3>🚨 گزارش‌ها</h3>
-            <strong>
-              ${reports.rows[0].count}
-            </strong>
-          </div>
-
-          <div class="card">
-            <h3>🔒 حساب‌های تعلیق‌شده</h3>
-            <strong>
-              ${suspended.rows[0].count}
-            </strong>
-          </div>
-
-        </div>
-
-        <p>
-
-          <a
-            class="btn"
-            href="/admin-moderation-queue"
-          >
-            صف بررسی محتوا
-          </a>
-
-          <a
-            class="btn"
-            href="/admin-reports"
-          >
-            گزارش‌های کاربران
-          </a>
-
-        </p>
+              </div>
+            `).join("")
+          : `
+            <div class="empty">
+              هنوز محصولی به علاقه‌مندی‌ها اضافه نکرده‌اید.
+            </div>
+          `
+        }
 
       </div>
     `
@@ -16840,348 +13579,173 @@ if (
 
 
 // ------------------------------------------------------------
-// MODERATION QUEUE
+// ADD WISHLIST
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/wishlist-add"
+) {
+
+  const d = await readBody(req);
+
+  const productId =
+    Number(d.get("product_id"));
+
+  if (
+    Number.isInteger(productId) &&
+    productId > 0
+  ) {
+
+    await pool.query(`
+      INSERT INTO wishlist_items(
+        user_id,
+        product_id
+      )
+      VALUES($1,$2)
+      ON CONFLICT(user_id,product_id)
+      DO NOTHING
+    `,[
+      user.id,
+      productId
+    ]);
+  }
+
+  redirect(
+    res,
+    `/product?id=${productId}`
+  );
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// REMOVE WISHLIST
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/wishlist-remove"
+) {
+
+  const d = await readBody(req);
+
+  const productId =
+    Number(d.get("product_id"));
+
+  if (
+    Number.isInteger(productId) &&
+    productId > 0
+  ) {
+
+    await pool.query(`
+      DELETE FROM wishlist_items
+      WHERE
+        user_id=$1
+        AND product_id=$2
+    `,[
+      user.id,
+      productId
+    ]);
+  }
+
+  redirect(
+    res,
+    "/wishlist"
+  );
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// CHECKOUT PAGE
 // ------------------------------------------------------------
 
 if (
   req.method === "GET" &&
-  path === "/admin-moderation-queue"
+  path === "/checkout"
 ) {
-
-  if (!(await isAdmin(user.id))) {
-
-    sendJson(res,{
-      ok:false,
-      error:"forbidden"
-    },403);
-
-    return;
-  }
-
-  const status =
-    (url.searchParams.get("status") || "pending")
-      .trim();
 
   const rows = await pool.query(`
     SELECT
-      q.id,
-      q.target_type,
-      q.target_id,
-      q.reason,
-      q.priority,
-      q.status,
-      q.created_at,
-      u.name AS assigned_name
-    FROM moderation_queue q
-    LEFT JOIN users u
-      ON u.id=q.assigned_to
-    WHERE
-      $1=''
-      OR q.status=$1
-    ORDER BY
-      q.priority DESC,
-      q.created_at ASC
-    LIMIT 300
-  `,[status]);
+      c.product_id,
+      c.quantity,
+      p.name,
+      p.price,
+      p.currency,
+      p.stock,
+      p.active,
+      p.seller_id
+    FROM cart_items c
+    JOIN products p
+      ON p.id=c.product_id
+    WHERE c.user_id=$1
+    ORDER BY c.created_at ASC
+  `,[user.id]);
 
-  sendPage(
-    res,
-    "صف نظارت",
-    `
-      <div class="card">
-
-        <h2>
-          🔎 صف بررسی محتوا
-        </h2>
-
-        <p>
-
-          <a
-            class="btn"
-            href="/admin-moderation-queue?status=pending"
-          >
-            در انتظار
-          </a>
-
-          <a
-            class="btn"
-            href="/admin-moderation-queue?status=approved"
-          >
-            تأیید شده
-          </a>
-
-          <a
-            class="btn"
-            href="/admin-moderation-queue?status=removed"
-          >
-            حذف شده
-          </a>
-
-        </p>
-
-      </div>
-
-      ${
-        rows.rows.map(q => `
-
-          <div class="card">
-
-            <h3>
-              بررسی #${q.id}
-            </h3>
-
-            <p>
-              نوع محتوا:
-              ${escapeHtml(q.target_type)}
-            </p>
-
-            <p>
-              شناسه:
-              ${q.target_id}
-            </p>
-
-            <p>
-              دلیل:
-              ${escapeHtml(q.reason || "")}
-            </p>
-
-            <p>
-              اولویت:
-              ${q.priority}
-            </p>
-
-            <p>
-              وضعیت:
-              ${escapeHtml(q.status)}
-            </p>
-
-            <a
-              class="btn"
-              href="/admin-moderation-item?id=${q.id}"
-            >
-              بررسی
-            </a>
-
-          </div>
-
-        `).join("")
-      }
-    `
-  );
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// MODERATION ITEM
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/admin-moderation-item"
-) {
-
-  if (!(await isAdmin(user.id))) {
-
-    sendJson(res,{
-      ok:false,
-      error:"forbidden"
-    },403);
-
-    return;
-  }
-
-  const queueId =
-    Number(url.searchParams.get("id"));
-
-  if (
-    !Number.isInteger(queueId) ||
-    queueId <= 0
-  ) {
+  if (!rows.rows.length) {
 
     redirect(
       res,
-      "/admin-moderation-queue"
+      "/cart"
     );
 
     return;
   }
 
-  const result = await pool.query(`
-    SELECT *
-    FROM moderation_queue
-    WHERE id=$1
-    LIMIT 1
-  `,[queueId]);
+  let total = 0;
 
-  if (!result.rows.length) {
-
-    redirect(
-      res,
-      "/admin-moderation-queue"
-    );
-
-    return;
-  }
-
-  const q = result.rows[0];
-
-  let contentHtml = `
-    <p>
-      محتوای مورد نظر در دسترس نیست.
-    </p>
-  `;
-
-  if (q.target_type === "post") {
-
-    const p = await pool.query(`
-      SELECT
-        p.id,
-        p.content,
-        p.image_url,
-        p.user_id,
-        u.name,
-        u.username
-      FROM posts p
-      JOIN users u
-        ON u.id=p.user_id
-      WHERE p.id=$1
-      LIMIT 1
-    `,[q.target_id]);
-
-    if (p.rows.length) {
-
-      const x = p.rows[0];
-
-      contentHtml = `
-        <p>
-          <strong>
-            ${escapeHtml(x.name)}
-          </strong>
-          @${escapeHtml(x.username || "")}
-        </p>
-
-        <p>
-          ${escapeHtml(x.content || "")}
-        </p>
-
-        ${
-          x.image_url
-          ? `
-            <img
-              src="${escapeHtml(x.image_url)}"
-              style="
-                max-width:100%;
-                border-radius:12px;
-              "
-            >
-          `
-          : ""
-        }
-      `;
-    }
-  }
-
-  if (q.target_type === "comment") {
-
-    const c = await pool.query(`
-      SELECT
-        c.id,
-        c.content,
-        c.user_id,
-        u.name,
-        u.username
-      FROM comments c
-      JOIN users u
-        ON u.id=c.user_id
-      WHERE c.id=$1
-      LIMIT 1
-    `,[q.target_id]);
-
-    if (c.rows.length) {
-
-      const x = c.rows[0];
-
-      contentHtml = `
-        <p>
-          <strong>
-            ${escapeHtml(x.name)}
-          </strong>
-          @${escapeHtml(x.username || "")}
-        </p>
-
-        <p>
-          ${escapeHtml(x.content || "")}
-        </p>
-      `;
-    }
+  for (const item of rows.rows) {
+    total +=
+      Number(item.price) *
+      Number(item.quantity);
   }
 
   sendPage(
     res,
-    "بررسی محتوا",
+    "ثبت سفارش",
     `
       <div class="card">
 
         <h2>
-          🔎 بررسی محتوا #${q.id}
+          🧾 ثبت سفارش
         </h2>
 
         <p>
-          نوع:
-          ${escapeHtml(q.target_type)}
+          مبلغ کل:
+          <b>${total}</b>
+          ${escapeHtml(
+            rows.rows[0].currency || "IRR"
+          )}
         </p>
-
-        <p>
-          دلیل:
-          ${escapeHtml(q.reason || "")}
-        </p>
-
-        <hr>
-
-        ${contentHtml}
-
-        <hr>
 
         <form
           method="POST"
-          action="/admin-moderation-action"
+          action="/checkout"
         >
 
           <input
-            type="hidden"
-            name="queue_id"
-            value="${q.id}"
+            name="shipping_name"
+            placeholder="نام گیرنده"
+            required
           >
 
           <input
-            name="reason"
-            placeholder="دلیل تصمیم"
+            name="shipping_phone"
+            placeholder="شماره تلفن"
+            required
           >
 
-          <button
-            class="btn"
-            name="action"
-            value="approve"
-          >
-            تأیید
-          </button>
+          <textarea
+            name="shipping_address"
+            placeholder="آدرس کامل"
+            required
+          ></textarea>
 
-          <button
-            class="btn"
-            name="action"
-            value="remove"
-          >
-            حذف محتوا
-          </button>
-
-          <button
-            class="btn"
-            name="action"
-            value="dismiss"
-          >
-            رد گزارش
+          <button class="btn full">
+            ثبت سفارش
           </button>
 
         </form>
@@ -17195,175 +13759,356 @@ if (
 
 
 // ------------------------------------------------------------
-// MODERATION ACTION
+// CREATE ORDER
 // ------------------------------------------------------------
 
 if (
   req.method === "POST" &&
-  path === "/admin-moderation-action"
+  path === "/checkout"
 ) {
-
-  if (!(await isAdmin(user.id))) {
-
-    sendJson(res,{
-      ok:false,
-      error:"forbidden"
-    },403);
-
-    return;
-  }
 
   const d = await readBody(req);
 
-  const queueId =
-    Number(d.get("queue_id"));
+  const shippingName =
+    (d.get("shipping_name") || "")
+      .trim()
+      .slice(0,200);
 
-  const action =
-    (d.get("action") || "").trim();
+  const shippingPhone =
+    (d.get("shipping_phone") || "")
+      .trim()
+      .slice(0,50);
 
-  const reason =
-    (d.get("reason") || "")
+  const shippingAddress =
+    (d.get("shipping_address") || "")
       .trim()
       .slice(0,1000);
 
   if (
-    !Number.isInteger(queueId) ||
-    queueId <= 0
+    !shippingName ||
+    !shippingPhone ||
+    !shippingAddress
   ) {
 
     redirect(
       res,
-      "/admin-moderation-queue"
+      "/checkout"
     );
 
     return;
   }
 
-  const allowed = [
-    "approve",
-    "remove",
-    "dismiss"
-  ];
+  const client =
+    await pool.connect();
 
-  if (!allowed.includes(action)) {
+  try {
+
+    await client.query("BEGIN");
+
+    const cart =
+      await client.query(`
+        SELECT
+          c.product_id,
+          c.quantity,
+          p.name,
+          p.price,
+          p.currency,
+          p.stock,
+          p.active,
+          p.seller_id
+        FROM cart_items c
+        JOIN products p
+          ON p.id=c.product_id
+        WHERE c.user_id=$1
+        FOR UPDATE
+      `,[user.id]);
+
+    if (!cart.rows.length) {
+
+      await client.query("ROLLBACK");
+
+      redirect(
+        res,
+        "/cart"
+      );
+
+      return;
+    }
+
+    let total = 0;
+
+    for (const item of cart.rows) {
+
+      if (
+        !item.active ||
+        item.stock < item.quantity
+      ) {
+
+        await client.query("ROLLBACK");
+
+        redirect(
+          res,
+          "/cart"
+        );
+
+        return;
+      }
+
+      total +=
+        Number(item.price) *
+        Number(item.quantity);
+    }
+
+    const currency =
+      cart.rows[0].currency || "IRR";
+
+    const order =
+      await client.query(`
+        INSERT INTO shop_orders(
+          buyer_id,
+          total_amount,
+          currency,
+          status,
+          shipping_name,
+          shipping_phone,
+          shipping_address
+        )
+        VALUES(
+          $1,$2,$3,'pending',$4,$5,$6
+        )
+        RETURNING id
+      `,[
+        user.id,
+        total,
+        currency,
+        shippingName,
+        shippingPhone,
+        shippingAddress
+      ]);
+
+    const orderId =
+      order.rows[0].id;
+
+    for (const item of cart.rows) {
+
+      await client.query(`
+        INSERT INTO shop_order_items(
+          order_id,
+          product_id,
+          seller_id,
+          quantity,
+          unit_price
+        )
+        VALUES($1,$2,$3,$4,$5)
+      `,[
+        orderId,
+        item.product_id,
+        item.seller_id,
+        item.quantity,
+        item.price
+      ]);
+
+      await client.query(`
+        UPDATE products
+        SET
+          stock=stock-$1,
+          updated_at=NOW()
+        WHERE
+          id=$2
+          AND stock >= $1
+      `,[
+        item.quantity,
+        item.product_id
+      ]);
+    }
+
+    await client.query(`
+      DELETE FROM cart_items
+      WHERE user_id=$1
+    `,[user.id]);
+
+    await client.query("COMMIT");
 
     redirect(
       res,
-      `/admin-moderation-item?id=${queueId}`
+      `/order?id=${orderId}`
     );
 
     return;
+
+  } catch (err) {
+
+    try {
+      await client.query("ROLLBACK");
+    } catch {}
+
+    console.error(
+      "CREATE ORDER ERROR:",
+      err
+    );
+
+    sendText(
+      res,
+      500,
+      "خطا در ثبت سفارش"
+    );
+
+    return;
+
+  } finally {
+
+    client.release();
   }
+}
 
-  const q = await pool.query(`
-    SELECT
-      id,
-      target_type,
-      target_id
-    FROM moderation_queue
-    WHERE id=$1
-    LIMIT 1
-  `,[queueId]);
 
-  if (!q.rows.length) {
+// ------------------------------------------------------------
+// ORDER PAGE
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/order"
+) {
+
+  const orderId =
+    Number(url.searchParams.get("id"));
+
+  if (
+    !Number.isInteger(orderId) ||
+    orderId <= 0
+  ) {
 
     redirect(
       res,
-      "/admin-moderation-queue"
+      "/orders"
     );
 
     return;
   }
 
-  const item = q.rows[0];
+  const order =
+    await pool.query(`
+      SELECT
+        id,
+        total_amount,
+        currency,
+        status,
+        shipping_name,
+        shipping_phone,
+        shipping_address,
+        created_at,
+        updated_at
+      FROM shop_orders
+      WHERE
+        id=$1
+        AND buyer_id=$2
+      LIMIT 1
+    `,[
+      orderId,
+      user.id
+    ]);
 
-  let newStatus = "approved";
+  if (!order.rows.length) {
 
-  if (action === "remove") {
-    newStatus = "removed";
+    redirect(
+      res,
+      "/orders"
+    );
+
+    return;
   }
 
-  if (action === "dismiss") {
-    newStatus = "dismissed";
-  }
+  const items =
+    await pool.query(`
+      SELECT
+        oi.quantity,
+        oi.unit_price,
+        p.name,
+        p.image_url
+      FROM shop_order_items oi
+      JOIN products p
+        ON p.id=oi.product_id
+      WHERE oi.order_id=$1
+      ORDER BY oi.id ASC
+    `,[orderId]);
 
-  await pool.query(`
-    UPDATE moderation_queue
-    SET
-      status=$1,
-      assigned_to=$2,
-      reviewed_at=NOW()
-    WHERE id=$3
-  `,[
-    newStatus,
-    user.id,
-    queueId
-  ]);
+  const o =
+    order.rows[0];
 
-  if (action === "remove") {
-
-    if (item.target_type === "post") {
-
-      await pool.query(`
-        DELETE FROM posts
-        WHERE id=$1
-      `,[item.target_id]);
-    }
-
-    if (item.target_type === "comment") {
-
-      await pool.query(`
-        DELETE FROM comments
-        WHERE id=$1
-      `,[item.target_id]);
-    }
-
-    if (item.target_type === "reel") {
-
-      await pool.query(`
-        DELETE FROM reels
-        WHERE id=$1
-      `,[item.target_id]);
-    }
-
-    if (item.target_type === "story") {
-
-      await pool.query(`
-        DELETE FROM stories
-        WHERE id=$1
-      `,[item.target_id]);
-    }
-  }
-
-  await pool.query(`
-    INSERT INTO content_actions(
-      admin_id,
-      target_type,
-      target_id,
-      action,
-      reason
-    )
-    VALUES($1,$2,$3,$4,$5)
-  `,[
-    user.id,
-    item.target_type,
-    item.target_id,
-    action,
-    reason
-  ]);
-
-  await logAdminAction(
-    user.id,
-    `moderation_${action}`,
-    null,
-    item.target_type,
-    item.target_id,
-    reason
-  );
-
-  redirect(
+  sendPage(
     res,
-    "/admin-moderation-queue"
+    `سفارش #${o.id}`,
+    `
+      <div class="card">
+
+        <h2>
+          📦 سفارش #${o.id}
+        </h2>
+
+        <p>
+          وضعیت:
+          <b>${escapeHtml(o.status)}</b>
+        </p>
+
+        <p>
+          مبلغ:
+          ${escapeHtml(String(o.total_amount))}
+          ${escapeHtml(o.currency)}
+        </p>
+
+        <p>
+          گیرنده:
+          ${escapeHtml(o.shipping_name)}
+        </p>
+
+        <p>
+          تلفن:
+          ${escapeHtml(o.shipping_phone)}
+        </p>
+
+        <p>
+          آدرس:
+          ${escapeHtml(o.shipping_address)}
+        </p>
+
+      </div>
+
+      ${
+        items.rows.map(item => `
+          <div class="card">
+
+            <h3>
+              ${escapeHtml(item.name)}
+            </h3>
+
+            ${
+              item.image_url
+              ? `
+                <img
+                  class="post-image"
+                  src="${escapeHtml(item.image_url)}"
+                >
+              `
+              : ""
+            }
+
+            <p>
+              تعداد:
+              ${item.quantity}
+            </p>
+
+            <p>
+              قیمت واحد:
+              ${escapeHtml(
+                String(item.unit_price)
+              )}
+            </p>
+
+          </div>
+        `).join("")
+      }
+    `
   );
 
   return;
@@ -17371,32 +14116,118 @@ if (
 
 
 // ------------------------------------------------------------
-// ADD CONTENT TO MODERATION QUEUE
+// MY ORDERS
 // ------------------------------------------------------------
 
 if (
-  req.method === "POST" &&
-  path === "/api/moderation/queue"
+  req.method === "GET" &&
+  path === "/orders"
 ) {
 
-  if (!(await isAdmin(user.id))) {
+  const rows =
+    await pool.query(`
+      SELECT
+        id,
+        total_amount,
+        currency,
+        status,
+        created_at
+      FROM shop_orders
+      WHERE buyer_id=$1
+      ORDER BY created_at DESC
+      LIMIT 200
+    `,[user.id]);
 
-    sendJson(res,{
-      ok:false,
-      error:"forbidden"
-    },403);
+  sendPage(
+    res,
+    "سفارش‌های من",
+    `
+      <div class="card">
 
-    return;
-  }
+        <h2>
+          📦 سفارش‌های من
+        </h2>
 
-  const d = await readBody(req);
+        ${
+          rows.rows.length
+          ? rows.rows.map(o => `
+              <div class="card">
 
-  const targetType =
-    (d.get("target_type") || "")
-      .trim();
+                <h3>
+                  سفارش #${o.id}
+                </h3>
 
-  const targetId =
-    Number(d.get("target_id"));
+                <p>
+                  مبلغ:
+                  ${escapeHtml(
+                    String(o.total_amount)
+                  )}
+                  ${escapeHtml(o.currency)}
+                </p>
+
+                <p>
+                  وضعیت:
+                  ${escapeHtml(o.status)}
+                </p>
+
+                <a
+                  href="/order?id=${o.id}"
+                >
+                  <button>
+                    مشاهده جزئیات
+                  </button>
+                </a>
+
+              </div>
+            `).join("")
+          : `
+            <div class="empty">
+              هنوز سفارشی ثبت نکرده‌اید.
+            </div>
+          `
+        }
+
+      </div>
+    `
+  );
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// SHOP ORDERS API
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/api/shop/orders"
+) {
+
+  const rows =
+    await pool.query(`
+      SELECT
+        id,
+        total_amount,
+        currency,
+        status,
+        shipping_name,
+        shipping_phone,
+        shipping_address,
+        created_at
+      FROM shop_orders
+      WHERE buyer_id=$1
+      ORDER BY created_at DESC
+      LIMIT 200
+    `,[user.id]);
+
+  sendJson(res,{
+    ok:true,
+    orders:rows.rows
+  });
+
+  return;
+}   Number(d.get("target_id"));
 
   const reason =
     (d.get("reason") || "")
@@ -17829,18 +14660,9 @@ if (
   });
 
   return;
-}// ============================================================
-// SECTION 22
-// ADVANCED MESSAGING
-// DIRECT MESSAGES / CONVERSATIONS / READ STATUS / DELETION
-// MESSAGE REACTIONS / TYPING STATUS / MESSAGE SEARCH
-// ============================================================
+}
 
-
-// ------------------------------------------------------------
-// MESSAGE ADVANCED TABLES
-// ------------------------------------------------------------
-
+/* EXTRA FEATURE SECTION 22 */
 await pool.query(`
   ALTER TABLE messages
   ADD COLUMN IF NOT EXISTS is_read BOOLEAN
@@ -18439,59 +15261,79 @@ if (
     return;
   }
 
-  const existing = await pool.query(`
-    SELECT id
-    FROM message_reactions
-    WHERE
-      message_id=$1
-      AND user_id=$2
-    LIMIT 1
+  await pool.query(`
+    INSERT INTO message_reactions(
+      message_id,
+      user_id,
+      reaction
+    )
+    VALUES($1,$2,$3)
+    ON CONFLICT(message_id,user_id)
+    DO UPDATE SET
+      reaction=EXCLUDED.reaction,
+      created_at=NOW()
   `,[
     messageId,
-    user.id
+    user.id,
+    reaction
   ]);
 
-  if (existing.rows.length) {
+  sendJson(res,{
+    ok:true
+  });
 
-    await pool.query(`
-      UPDATE message_reactions
-      SET
-        reaction=$1,
-        created_at=NOW()
-      WHERE id=$2
-    `,[
-      reaction,
-      existing.rows[0].id
-    ]);
+  return;
+}   const message = await pool.query(`
+    SELECT
+      id,
+      sender_id,
+      receiver_id
+    FROM messages
+    WHERE id=$1
+    LIMIT 1
+  `,[messageId]);
 
-  } else {
+  if (!message.rows.length) {
 
-    await pool.query(`
-      INSERT INTO message_reactions(
-        message_id,
-        user_id,
-        reaction
-      )
-      VALUES($1,$2,$3)
-    `,[
-      messageId,
-      user.id,
-      reaction
-    ]);
+    sendJson(res,{
+      ok:false,
+      error:"message_not_found"
+    },404);
+
+    return;
   }
 
-  const receiverId =
-    m.sender_id === user.id
-      ? m.receiver_id
-      : m.sender_id;
+  const m = message.rows[0];
 
-  await notify(
-    receiverId,
-    user.id,
-    "message_reaction",
+  if (
+    m.sender_id !== user.id &&
+    m.receiver_id !== user.id
+  ) {
+
+    sendJson(res,{
+      ok:false,
+      error:"forbidden"
+    },403);
+
+    return;
+  }
+
+  await pool.query(`
+    INSERT INTO message_reactions(
+      message_id,
+      user_id,
+      reaction
+    )
+    VALUES($1,$2,$3)
+    ON CONFLICT(message_id,user_id)
+    DO UPDATE SET
+      reaction=EXCLUDED.reaction,
+      created_at=NOW()
+  `,[
     messageId,
-    `${user.name} به پیام شما واکنش نشان داد.`
-  );
+    user.id,
+    reaction
+  ]);
 
   sendJson(res,{
     ok:true
@@ -18507,7 +15349,7 @@ if (
 
 if (
   req.method === "POST" &&
-  path === "/api/message/reaction/remove"
+  path === "/api/message/reaction-remove"
 ) {
 
   const d = await readBody(req);
@@ -18593,7 +15435,11 @@ if (
       AND deleted_for_sender=FALSE
     RETURNING
       id,
+      sender_id,
+      receiver_id,
       message,
+      created_at,
+      is_read,
       edited,
       updated_at
   `,[
@@ -18622,7 +15468,7 @@ if (
 
 
 // ------------------------------------------------------------
-// DELETE MESSAGE FOR CURRENT USER
+// DELETE MESSAGE FOR ME
 // ------------------------------------------------------------
 
 if (
@@ -18634,9 +15480,6 @@ if (
 
   const messageId =
     Number(d.get("message_id"));
-
-  const mode =
-    (d.get("mode") || "me").trim();
 
   if (
     !Number.isInteger(messageId) ||
@@ -18651,15 +15494,16 @@ if (
     return;
   }
 
-  const message = await pool.query(`
-    SELECT
-      id,
-      sender_id,
-      receiver_id
-    FROM messages
-    WHERE id=$1
-    LIMIT 1
-  `,[messageId]);
+  const message =
+    await pool.query(`
+      SELECT
+        id,
+        sender_id,
+        receiver_id
+      FROM messages
+      WHERE id=$1
+      LIMIT 1
+    `,[messageId]);
 
   if (!message.rows.length) {
 
@@ -18671,7 +15515,8 @@ if (
     return;
   }
 
-  const m = message.rows[0];
+  const m =
+    message.rows[0];
 
   if (
     m.sender_id !== user.id &&
@@ -18686,17 +15531,7 @@ if (
     return;
   }
 
-  if (
-    mode === "everyone" &&
-    m.sender_id === user.id
-  ) {
-
-    await pool.query(`
-      DELETE FROM messages
-      WHERE id=$1
-    `,[messageId]);
-
-  } else if (m.sender_id === user.id) {
+  if (m.sender_id === user.id) {
 
     await pool.query(`
       UPDATE messages
@@ -18722,18 +15557,119 @@ if (
 
 
 // ------------------------------------------------------------
-// TYPING START
+// DELETE MESSAGE FOR EVERYONE
 // ------------------------------------------------------------
 
 if (
   req.method === "POST" &&
-  path === "/api/message/typing"
+  path === "/api/message/delete-everyone"
+) {
+
+  const d = await readBody(req);
+
+  const messageId =
+    Number(d.get("message_id"));
+
+  if (
+    !Number.isInteger(messageId) ||
+    messageId <= 0
+  ) {
+
+    sendJson(res,{
+      ok:false,
+      error:"invalid_message"
+    },400);
+
+    return;
+  }
+
+  const message =
+    await pool.query(`
+      SELECT
+        id,
+        sender_id,
+        receiver_id,
+        created_at
+      FROM messages
+      WHERE id=$1
+      LIMIT 1
+    `,[messageId]);
+
+  if (!message.rows.length) {
+
+    sendJson(res,{
+      ok:false,
+      error:"message_not_found"
+    },404);
+
+    return;
+  }
+
+  const m =
+    message.rows[0];
+
+  if (m.sender_id !== user.id) {
+
+    sendJson(res,{
+      ok:false,
+      error:"forbidden"
+    },403);
+
+    return;
+  }
+
+  const age =
+    Date.now() -
+    new Date(m.created_at).getTime();
+
+  const maxAge =
+    24 * 60 * 60 * 1000;
+
+  if (age > maxAge) {
+
+    sendJson(res,{
+      ok:false,
+      error:"message_too_old"
+    },400);
+
+    return;
+  }
+
+  await pool.query(`
+    UPDATE messages
+    SET
+      message='این پیام حذف شد.',
+      edited=TRUE,
+      updated_at=NOW()
+    WHERE id=$1
+  `,[messageId]);
+
+  sendJson(res,{
+    ok:true
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// TYPING STATUS
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/api/messages/typing"
 ) {
 
   const d = await readBody(req);
 
   const receiverId =
     Number(d.get("receiver_id"));
+
+  const typing =
+    String(
+      d.get("typing") || "true"
+    ).toLowerCase() === "true";
 
   if (
     !Number.isInteger(receiverId) ||
@@ -18749,24 +15685,35 @@ if (
     return;
   }
 
-  await pool.query(`
-    INSERT INTO message_typing(
-      user_id,
-      receiver_id,
-      updated_at
-    )
-    VALUES($1,$2,NOW())
+  if (typing) {
 
-    ON CONFLICT(
-      user_id,
-      receiver_id
-    )
-    DO UPDATE SET
-      updated_at=NOW()
-  `,[
-    user.id,
-    receiverId
-  ]);
+    await pool.query(`
+      INSERT INTO message_typing(
+        user_id,
+        receiver_id,
+        updated_at
+      )
+      VALUES($1,$2,NOW())
+      ON CONFLICT(user_id,receiver_id)
+      DO UPDATE SET
+        updated_at=NOW()
+    `,[
+      user.id,
+      receiverId
+    ]);
+
+  } else {
+
+    await pool.query(`
+      DELETE FROM message_typing
+      WHERE
+        user_id=$1
+        AND receiver_id=$2
+    `,[
+      user.id,
+      receiverId
+    ]);
+  }
 
   sendJson(res,{
     ok:true
@@ -18777,16 +15724,18 @@ if (
 
 
 // ------------------------------------------------------------
-// TYPING STATUS
+// CHECK TYPING STATUS
 // ------------------------------------------------------------
 
 if (
   req.method === "GET" &&
-  path === "/api/message/typing"
+  path === "/api/messages/typing"
 ) {
 
   const otherId =
-    Number(url.searchParams.get("user"));
+    Number(
+      url.searchParams.get("user")
+    );
 
   if (
     !Number.isInteger(otherId) ||
@@ -18804,6 +15753,7 @@ if (
   const result = await pool.query(`
     SELECT
       user_id,
+      receiver_id,
       updated_at
     FROM message_typing
     WHERE
@@ -18832,14 +15782,14 @@ if (
 
 if (
   req.method === "POST" &&
-  path === "/api/message/typing-cleanup"
+  path === "/api/messages/typing-cleanup"
 ) {
 
   const result = await pool.query(`
     DELETE FROM message_typing
     WHERE
       updated_at <
-        NOW() - INTERVAL '1 minute'
+        NOW() - INTERVAL '30 seconds'
   `);
 
   sendJson(res,{
@@ -18875,33 +15825,31 @@ if (
     return;
   }
 
-  const result = await pool.query(`
+  const rows = await pool.query(`
     SELECT
       m.id,
       m.sender_id,
       m.receiver_id,
       m.message,
       m.created_at,
-
-      u.name AS sender_name,
-      u.username AS sender_username
-
+      u.name,
+      u.username
     FROM messages m
-
     JOIN users u
-      ON u.id=m.sender_id
-
+      ON u.id=
+        CASE
+          WHEN m.sender_id=$1
+          THEN m.receiver_id
+          ELSE m.sender_id
+        END
     WHERE
       (
         m.sender_id=$1
         OR m.receiver_id=$1
       )
-      AND
-      m.message ILIKE $2
-
+      AND m.message ILIKE $2
     ORDER BY
       m.created_at DESC
-
     LIMIT 100
   `,[
     user.id,
@@ -18910,7 +15858,7 @@ if (
 
   sendJson(res,{
     ok:true,
-    messages:result.rows
+    messages:rows.rows
   });
 
   return;
@@ -18918,510 +15866,713 @@ if (
 
 
 // ------------------------------------------------------------
-// MESSAGE PROFILE
+// MESSAGE PAGE
 // ------------------------------------------------------------
 
 if (
   req.method === "GET" &&
-  path === "/api/message/user"
+  path === "/messages"
 ) {
 
-  const otherId =
-    Number(url.searchParams.get("id"));
+  const targetId =
+    Number(
+      url.searchParams.get("user")
+    );
+
+  let target = null;
 
   if (
-    !Number.isInteger(otherId) ||
-    otherId <= 0
+    Number.isInteger(targetId) &&
+    targetId > 0 &&
+    targetId !== user.id
   ) {
 
-    sendJson(res,{
-      ok:false,
-      error:"invalid_user"
-    },400);
+    const targetResult =
+      await pool.query(`
+        SELECT
+          id,
+          name,
+          username,
+          avatar_url
+        FROM users
+        WHERE
+          id=$1
+          AND is_active=TRUE
+        LIMIT 1
+      `,[targetId]);
 
-    return;
-  }
-
-  const result = await pool.query(`
-    SELECT
-      id,
-      name,
-      username,
-      avatar_url,
-      bio,
-      is_verified,
-      is_active
-    FROM users
-    WHERE id=$1
-    LIMIT 1
-  `,[otherId]);
-
-  if (!result.rows.length) {
-
-    sendJson(res,{
-      ok:false,
-      error:"user_not_found"
-    },404);
-
-    return;
-  }
-
-  sendJson(res,{
-    ok:true,
-    user:result.rows[0]
-  });
-
-  return;
-  }// ============================================================
-// SECTION 23
-// ADVANCED NOTIFICATIONS
-// PUSH-READY EVENTS / NOTIFICATION PREFERENCES
-// MENTIONS / FOLLOW / LIKE / COMMENT / SYSTEM ALERTS
-// ============================================================
-
-
-// ------------------------------------------------------------
-// NOTIFICATION ADVANCED TABLES
-// ------------------------------------------------------------
-
-await pool.query(`
-  ALTER TABLE notifications
-  ADD COLUMN IF NOT EXISTS is_read BOOLEAN
-  DEFAULT FALSE
-`);
-
-await pool.query(`
-  ALTER TABLE notifications
-  ADD COLUMN IF NOT EXISTS entity_type VARCHAR(50)
-  DEFAULT NULL
-`);
-
-await pool.query(`
-  ALTER TABLE notifications
-  ADD COLUMN IF NOT EXISTS entity_id INTEGER
-  DEFAULT NULL
-`);
-
-await pool.query(`
-  ALTER TABLE notifications
-  ADD COLUMN IF NOT EXISTS created_at TIMESTAMP
-  DEFAULT NOW()
-`);
-
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS notification_preferences (
-    id SERIAL PRIMARY KEY,
-
-    user_id INTEGER NOT NULL
-      REFERENCES users(id)
-      ON DELETE CASCADE,
-
-    likes BOOLEAN DEFAULT TRUE,
-    comments BOOLEAN DEFAULT TRUE,
-    follows BOOLEAN DEFAULT TRUE,
-    messages BOOLEAN DEFAULT TRUE,
-    mentions BOOLEAN DEFAULT TRUE,
-    story_replies BOOLEAN DEFAULT TRUE,
-    live BOOLEAN DEFAULT TRUE,
-    payments BOOLEAN DEFAULT TRUE,
-    security BOOLEAN DEFAULT TRUE,
-    marketing BOOLEAN DEFAULT FALSE,
-
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW(),
-
-    UNIQUE(user_id)
-  )
-`);
-
-await pool.query(`
-  CREATE INDEX IF NOT EXISTS idx_notifications_user_read
-  ON notifications(user_id,is_read,created_at DESC)
-`);
-
-await pool.query(`
-  CREATE INDEX IF NOT EXISTS idx_notifications_entity
-  ON notifications(entity_type,entity_id,created_at DESC)
-`);
-
-
-// ------------------------------------------------------------
-// ENSURE NOTIFICATION PREFERENCES
-// ------------------------------------------------------------
-
-async function ensureNotificationPreferences(userId) {
-
-  await pool.query(`
-    INSERT INTO notification_preferences(user_id)
-    VALUES($1)
-    ON CONFLICT(user_id)
-    DO NOTHING
-  `,[userId]);
-}
-
-
-// ------------------------------------------------------------
-// SMART NOTIFICATION HELPER
-// ------------------------------------------------------------
-
-async function createNotification(
-  receiverId,
-  senderId,
-  type,
-  entityType,
-  entityId,
-  message
-) {
-
-  if (
-    !Number.isInteger(receiverId) ||
-    receiverId <= 0
-  ) {
-    return;
-  }
-
-  if (senderId === receiverId) {
-    return;
-  }
-
-  await ensureNotificationPreferences(receiverId);
-
-  const pref = await pool.query(`
-    SELECT
-      likes,
-      comments,
-      follows,
-      messages,
-      mentions,
-      story_replies,
-      live,
-      payments,
-      security,
-      marketing
-    FROM notification_preferences
-    WHERE user_id=$1
-    LIMIT 1
-  `,[receiverId]);
-
-  if (pref.rows.length) {
-
-    const p = pref.rows[0];
-
-    const allowed =
-      type === "like"
-        ? p.likes
-        : type === "comment"
-        ? p.comments
-        : type === "follow"
-        ? p.follows
-        : type === "message"
-        ? p.messages
-        : type === "mention"
-        ? p.mentions
-        : type === "story_reply"
-        ? p.story_replies
-        : type === "live"
-        ? p.live
-        : type === "payment"
-        ? p.payments
-        : type === "security"
-        ? p.security
-        : type === "marketing"
-        ? p.marketing
-        : true;
-
-    if (!allowed) {
-      return;
+    if (targetResult.rows.length) {
+      target =
+        targetResult.rows[0];
     }
   }
 
-  await pool.query(`
-    INSERT INTO notifications(
-      user_id,
-      actor_id,
-      type,
-      message,
-      entity_type,
-      entity_id,
-      is_read,
-      created_at
-    )
-    VALUES(
-      $1,
-      $2,
-      $3,
-      $4,
-      $5,
-      $6,
-      FALSE,
-      NOW()
-    )
-  `,[
-    receiverId,
-    senderId || null,
-    type,
-    message,
-    entityType || null,
-    Number.isInteger(entityId)
-      ? entityId
-      : null
-  ]);
-}
+  const conversations =
+    await pool.query(`
+      SELECT DISTINCT ON (
+        CASE
+          WHEN m.sender_id=$1
+          THEN m.receiver_id
+          ELSE m.sender_id
+        END
+      )
+        CASE
+          WHEN m.sender_id=$1
+          THEN m.receiver_id
+          ELSE m.sender_id
+        END AS other_user_id,
 
+        m.message,
+        m.created_at,
 
-// ------------------------------------------------------------
-// NOTIFICATION PREFERENCES PAGE
-// ------------------------------------------------------------
+        u.name,
+        u.username,
+        u.avatar_url
 
-if (
-  req.method === "GET" &&
-  path === "/notification-preferences"
-) {
+      FROM messages m
 
-  await ensureNotificationPreferences(user.id);
+      JOIN users u
+        ON u.id=
+          CASE
+            WHEN m.sender_id=$1
+            THEN m.receiver_id
+            ELSE m.sender_id
+          END
 
-  const result = await pool.query(`
-    SELECT *
-    FROM notification_preferences
-    WHERE user_id=$1
-    LIMIT 1
-  `,[user.id]);
+      WHERE
+        (
+          m.sender_id=$1
+          AND m.deleted_for_sender=FALSE
+        )
+        OR
+        (
+          m.receiver_id=$1
+          AND m.deleted_for_receiver=FALSE
+        )
 
-  const p = result.rows[0];
+      ORDER BY
+        CASE
+          WHEN m.sender_id=$1
+          THEN m.receiver_id
+          ELSE m.sender_id
+        END,
+        m.created_at DESC
+    `,[user.id]);
+
+  const sorted =
+    conversations.rows.sort(
+      (a,b) =>
+        new Date(b.created_at) -
+        new Date(a.created_at)
+    );
+
+  const conversationHtml =
+    sorted.map(c => `
+      <a
+        href="/messages?user=${c.other_user_id}"
+        class="conversation-item"
+      >
+        <div class="avatar">
+          ${
+            c.avatar_url
+              ? `<img src="${safeUrl(c.avatar_url)}">`
+              : escapeHtml(
+                  (c.name || "?")
+                    .slice(0,1)
+                )
+          }
+        </div>
+
+        <div class="conversation-info">
+          <strong>
+            ${escapeHtml(c.name || c.username || "")}
+          </strong>
+
+          <div class="conversation-preview">
+            ${escapeHtml(
+              (c.message || "")
+                .slice(0,60)
+            )}
+          </div>
+        </div>
+      </a>
+    `).join("");
+
+  const chatHtml =
+    target
+      ? `
+        <div class="chat-header">
+          <a
+            href="/profile?id=${target.id}"
+            class="chat-user"
+          >
+            <div class="avatar small">
+              ${
+                target.avatar_url
+                  ? `<img src="${safeUrl(target.avatar_url)}">`
+                  : escapeHtml(
+                      (target.name || "?")
+                        .slice(0,1)
+                    )
+              }
+            </div>
+
+            <strong>
+              ${escapeHtml(
+                target.name ||
+                target.username ||
+                ""
+              )}
+            </strong>
+          </a>
+        </div>
+
+        <div
+          id="messagesBox"
+          class="messages-box"
+        ></div>
+
+        <div class="typing-indicator"
+          id="typingIndicator">
+        </div>
+
+        <form
+          id="messageForm"
+          class="message-form"
+        >
+          <input
+            type="text"
+            id="messageInput"
+            name="message"
+            maxlength="5000"
+            autocomplete="off"
+            placeholder="پیام خود را بنویسید..."
+            required
+          >
+
+          <button type="submit">
+            ارسال
+          </button>
+        </form>
+
+        <script>
+        const TARGET_USER =
+          ${Number(target.id)};
+
+        let lastMessageId = 0;
+
+        function escapeMessage(value){
+          const div =
+            document.createElement("div");
+          div.textContent =
+            value == null ? "" : value;
+          return div.innerHTML;
+        }
+
+        async function loadMessages(){
+
+          try{
+
+            const r =
+              await fetch(
+                "/api/messages?user=" +
+                TARGET_USER +
+                "&limit=100"
+              );
+
+            const data =
+              await r.json();
+
+            if(!data.ok) return;
+
+            const box =
+              document.getElementById(
+                "messagesBox"
+              );
+
+            box.innerHTML =
+              data.messages.map(m => {
+
+                const mine =
+                  Number(m.sender_id) ===
+                  Number(${user.id});
+
+                const reactions =
+                  Array.isArray(m.reactions)
+                    ? m.reactions
+                    : [];
+
+                return \`
+                  <div
+                    class="message-row \${mine ? "mine" : "theirs"}"
+                    data-id="\${m.id}"
+                  >
+                    <div class="message-bubble">
+                      <div class="message-text">
+                        \${escapeMessage(m.message)}
+                      </div>
+
+                      <div class="message-meta">
+                        \${new Date(
+                          m.created_at
+                        ).toLocaleTimeString(
+                          "fa-IR",
+                          {
+                            hour:"2-digit",
+                            minute:"2-digit"
+                          }
+                        )}
+
+                        \${m.edited ? " · ویرایش‌شده" : ""}
+                      </div>
+
+                      <div class="message-reactions">
+                        \${reactions.map(x =>
+                          \`<span>\${escapeMessage(x.reaction)}</span>\`
+                        ).join("")}
+                      </div>
+                    </div>
+                  </div>
+                \`;
+
+              }).join("");
+
+            if(
+              data.messages.length
+            ){
+              lastMessageId =
+                data.messages[
+                  data.messages.length-1
+                ].id;
+            }
+
+            box.scrollTop =
+              box.scrollHeight;
+
+          }catch(e){
+            console.error(e);
+          }
+        }
+
+        document
+          .getElementById("messageForm")
+          .addEventListener(
+            "submit",
+            async function(e){
+
+              e.preventDefault();
+
+              const input =
+                document.getElementById(
+                  "messageInput"
+                );
+
+              const message =
+                input.value.trim();
+
+              if(!message) return;
+
+              input.disabled=true;
+
+              try{
+
+                const body =
+                  new URLSearchParams();
+
+                body.set(
+                  "receiver_id",
+                  TARGET_USER
+                );
+
+                body.set(
+                  "message",
+                  message
+                );
+
+                const r =
+                  await fetch(
+                    "/api/messages/send",
+                    {
+                      method:"POST",
+                      body
+                    }
+                  );
+
+                const data =
+                  await r.json();
+
+                if(data.ok){
+
+                  input.value="";
+
+                  await loadMessages();
+
+                }else{
+
+                  alert(
+                    data.error ||
+                    "ارسال پیام ناموفق بود."
+                  );
+                }
+
+              }catch(e){
+
+                alert(
+                  "خطا در ارسال پیام."
+                );
+
+              }finally{
+
+                input.disabled=false;
+                input.focus();
+              }
+            }
+          );
+
+        const input =
+          document.getElementById(
+            "messageInput"
+          );
+
+        let typingTimer=null;
+
+        input.addEventListener(
+          "input",
+          async function(){
+
+            try{
+
+              const body =
+                new URLSearchParams();
+
+              body.set(
+                "receiver_id",
+                TARGET_USER
+              );
+
+              body.set(
+                "typing",
+                "true"
+              );
+
+              await fetch(
+                "/api/messages/typing",
+                {
+                  method:"POST",
+                  body
+                }
+              );
+
+              clearTimeout(
+                typingTimer
+              );
+
+              typingTimer =
+                setTimeout(
+                  async function(){
+
+                    const stopBody =
+                      new URLSearchParams();
+
+                    stopBody.set(
+                      "receiver_id",
+                      TARGET_USER
+                    );
+
+                    stopBody.set(
+                      "typing",
+                      "false"
+                    );
+
+                    await fetch(
+                      "/api/messages/typing",
+                      {
+                        method:"POST",
+                        body:stopBody
+                      }
+                    );
+
+                  },
+                  1200
+                );
+
+            }catch(e){}
+          }
+        );
+
+        async function checkTyping(){
+
+          try{
+
+            const r =
+              await fetch(
+                "/api/messages/typing?user=" +
+                TARGET_USER
+              );
+
+            const data =
+              await r.json();
+
+            const indicator =
+              document.getElementById(
+                "typingIndicator"
+              );
+
+            indicator.textContent =
+              data.typing
+                ? "در حال نوشتن..."
+                : "";
+
+          }catch(e){}
+        }
+
+        loadMessages();
+
+        setInterval(
+          loadMessages,
+          3000
+        );
+
+        setInterval(
+          checkTyping,
+          2000
+        );
+        </script>
+      `
+      : `
+        <div class="empty-chat">
+          یک گفتگو را انتخاب کنید.
+        </div>
+      `;
 
   sendPage(
     res,
-    "تنظیمات اعلان‌ها",
-    `
-      <div class="card">
+    layout(
+      "پیام‌ها",
+      `
+      <div class="messages-page">
 
-        <h2>
-          🔔 تنظیمات اعلان‌ها
-        </h2>
+        <aside class="conversations-panel">
 
-        <form
-          method="POST"
-          action="/notification-preferences"
-        >
-
-          <label>
-            <input
-              type="checkbox"
-              name="likes"
-              ${p.likes ? "checked" : ""}
-            >
-            لایک‌ها
-          </label>
-
-          <br>
-
-          <label>
-            <input
-              type="checkbox"
-              name="comments"
-              ${p.comments ? "checked" : ""}
-            >
-            نظرات
-          </label>
-
-          <br>
-
-          <label>
-            <input
-              type="checkbox"
-              name="follows"
-              ${p.follows ? "checked" : ""}
-            >
-            دنبال کردن‌ها
-          </label>
-
-          <br>
-
-          <label>
-            <input
-              type="checkbox"
-              name="messages"
-              ${p.messages ? "checked" : ""}
-            >
+          <div class="panel-title">
             پیام‌ها
-          </label>
+          </div>
 
-          <br>
+          <div class="conversation-list">
+            ${
+              conversationHtml ||
+              `
+                <div class="empty-state">
+                  هنوز گفتگویی ندارید.
+                </div>
+              `
+            }
+          </div>
 
-          <label>
-            <input
-              type="checkbox"
-              name="mentions"
-              ${p.mentions ? "checked" : ""}
-            >
-            منشن‌ها
-          </label>
+        </aside>
 
-          <br>
-
-          <label>
-            <input
-              type="checkbox"
-              name="story_replies"
-              ${p.story_replies ? "checked" : ""}
-            >
-            پاسخ استوری
-          </label>
-
-          <br>
-
-          <label>
-            <input
-              type="checkbox"
-              name="live"
-              ${p.live ? "checked" : ""}
-            >
-            لایو
-          </label>
-
-          <br>
-
-          <label>
-            <input
-              type="checkbox"
-              name="payments"
-              ${p.payments ? "checked" : ""}
-            >
-            پرداخت‌ها
-          </label>
-
-          <br>
-
-          <label>
-            <input
-              type="checkbox"
-              name="security"
-              ${p.security ? "checked" : ""}
-            >
-            امنیت حساب
-          </label>
-
-          <br>
-
-          <label>
-            <input
-              type="checkbox"
-              name="marketing"
-              ${p.marketing ? "checked" : ""}
-            >
-            اعلان‌های تبلیغاتی
-          </label>
-
-          <br><br>
-
-          <button class="btn">
-            ذخیره تنظیمات
-          </button>
-
-        </form>
+        <main class="chat-panel">
+          ${chatHtml}
+        </main>
 
       </div>
-    `
+
+      <style>
+      .messages-page{
+        display:grid;
+        grid-template-columns:
+          320px 1fr;
+        gap:15px;
+        max-width:1100px;
+        margin:20px auto;
+      }
+
+      .conversations-panel,
+      .chat-panel{
+        background:#fff;
+        border:1px solid #ddd;
+        border-radius:16px;
+        overflow:hidden;
+      }
+
+      .panel-title{
+        padding:16px;
+        font-size:20px;
+        font-weight:700;
+        border-bottom:1px solid #eee;
+      }
+
+      .conversation-item{
+        display:flex;
+        gap:12px;
+        padding:13px;
+        text-decoration:none;
+        color:inherit;
+        border-bottom:1px solid #eee;
+      }
+
+      .conversation-item:hover{
+        background:#f7f7f7;
+      }
+
+      .avatar{
+        width:46px;
+        height:46px;
+        border-radius:50%;
+        overflow:hidden;
+        background:#eee;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        flex:none;
+      }
+
+      .avatar img{
+        width:100%;
+        height:100%;
+        object-fit:cover;
+      }
+
+      .avatar.small{
+        width:38px;
+        height:38px;
+      }
+
+      .conversation-info{
+        min-width:0;
+      }
+
+      .conversation-preview{
+        color:#777;
+        font-size:13px;
+        margin-top:4px;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        max-width:220px;
+      }
+
+      .chat-header{
+        padding:12px 16px;
+        border-bottom:1px solid #eee;
+      }
+
+      .chat-user{
+        display:flex;
+        align-items:center;
+        gap:10px;
+        text-decoration:none;
+        color:inherit;
+      }
+
+      .messages-box{
+        height:500px;
+        overflow-y:auto;
+        padding:16px;
+        background:#fafafa;
+      }
+
+      .message-row{
+        display:flex;
+        margin:8px 0;
+      }
+
+      .message-row.mine{
+        justify-content:flex-end;
+      }
+
+      .message-bubble{
+        max-width:75%;
+        padding:10px 13px;
+        border-radius:16px;
+        background:#e8e8e8;
+      }
+
+      .message-row.mine
+      .message-bubble{
+        background:#222;
+        color:#fff;
+      }
+
+      .message-text{
+        white-space:pre-wrap;
+        word-break:break-word;
+      }
+
+      .message-meta{
+        font-size:10px;
+        opacity:.65;
+        margin-top:5px;
+      }
+
+      .message-reactions{
+        display:flex;
+        gap:4px;
+        margin-top:5px;
+      }
+
+      .message-reactions span{
+        font-size:13px;
+      }
+
+      .typing-indicator{
+        height:24px;
+        padding:0 16px;
+        color:#777;
+        font-size:12px;
+      }
+
+      .message-form{
+        display:flex;
+        gap:8px;
+        padding:12px;
+        border-top:1px solid #eee;
+      }
+
+      .message-form input{
+        flex:1;
+        min-width:0;
+        padding:12px;
+        border:1px solid #ddd;
+        border-radius:12px;
+      }
+
+      .message-form button{
+        border:0;
+        border-radius:12px;
+        padding:0 20px;
+        cursor:pointer;
+      }
+
+      .empty-chat,
+      .empty-state{
+        padding:40px;
+        text-align:center;
+        color:#777;
+      }
+
+      @media(max-width:700px){
+
+        .messages-page{
+          grid-template-columns:1fr;
+        }
+
+        .conversations-panel{
+          max-height:280px;
+          overflow-y:auto;
+        }
+
+        .messages-box{
+          height:420px;
+        }
+      }
+      </style>
+      `
+    )
   );
 
   return;
-}
-
-
-// ------------------------------------------------------------
-// SAVE NOTIFICATION PREFERENCES
-// ------------------------------------------------------------
-
-if (
-  req.method === "POST" &&
-  path === "/notification-preferences"
-) {
-
-  const d = await readBody(req);
-
-  const boolValue = name =>
-    d.has(name);
-
-  await pool.query(`
-    INSERT INTO notification_preferences(
-      user_id,
-      likes,
-      comments,
-      follows,
-      messages,
-      mentions,
-      story_replies,
-      live,
-      payments,
-      security,
-      marketing,
-      updated_at
-    )
-    VALUES(
-      $1,
-      $2,
-      $3,
-      $4,
-      $5,
-      $6,
-      $7,
-      $8,
-      $9,
-      $10,
-      $11,
-      NOW()
-    )
-
-    ON CONFLICT(user_id)
-    DO UPDATE SET
-      likes=$2,
-      comments=$3,
-      follows=$4,
-      messages=$5,
-      mentions=$6,
-      story_replies=$7,
-      live=$8,
-      payments=$9,
-      security=$10,
-      marketing=$11,
-      updated_at=NOW()
-  `,[
-    user.id,
-    boolValue("likes"),
-    boolValue("comments"),
-    boolValue("follows"),
-    boolValue("messages"),
-    boolValue("mentions"),
-    boolValue("story_replies"),
-    boolValue("live"),
-    boolValue("payments"),
-    boolValue("security"),
-    boolValue("marketing")
-  ]);
-
-  redirect(
-    res,
-    "/notification-preferences"
-  );
-
-  return;
-}
-
-
-// ------------------------------------------------------------
-// NOTIFICATION COUNT API
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/api/notifications/count"
-) {
-
-  const result = await pool.query(`
-    SELECT
-      COUNT(*)::INTEGER AS count
-    FROM notifications
-    WHERE
+}   WHERE
       user_id=$1
       AND is_read=FALSE
   `,[user.id]);
@@ -19797,51 +16948,7 @@ if (
   return;
 }
 
-
-// ------------------------------------------------------------
-// NOTIFICATION HEALTH
-// ------------------------------------------------------------
-
-if (
-  req.method === "GET" &&
-  path === "/api/notifications/health"
-) {
-
-  const total = await pool.query(`
-    SELECT
-      COUNT(*)::INTEGER AS count
-    FROM notifications
-    WHERE user_id=$1
-  `,[user.id]);
-
-  const unread = await pool.query(`
-    SELECT
-      COUNT(*)::INTEGER AS count
-    FROM notifications
-    WHERE
-      user_id=$1
-      AND is_read=FALSE
-  `,[user.id]);
-
-  sendJson(res,{
-    ok:true,
-    total:Number(total.rows[0].count || 0),
-    unread:Number(unread.rows[0].count || 0)
-  });
-
-  return;
-    }// ============================================================
-// SECTION 24
-// ADVANCED PROFILE SYSTEM
-// PROFILE SETTINGS / SOCIAL LINKS / VERIFICATION
-// FOLLOWERS / FOLLOWING / PROFILE SEARCH / USER DISCOVERY
-// ============================================================
-
-
-// ------------------------------------------------------------
-// PROFILE ADVANCED TABLES
-// ------------------------------------------------------------
-
+/* EXTRA FEATURE SECTION 24 */
 await pool.query(`
   ALTER TABLE users
   ADD COLUMN IF NOT EXISTS website VARCHAR(500)
@@ -20466,6 +17573,7 @@ if (
     },400);
 
     return;
+  }    return;
   }
 
   if (username) {
@@ -20799,38 +17907,9 @@ if (
 
     return;
   }
+}
 
-  const result = await pool.query(`
-    SELECT
-      u.id,
-      u.name,
-      u.username,
-      u.avatar_url,
-      u.bio,
-      u.is_verified,
-
-      EXISTS(
-        SELECT 1
-        FROM follows f
-        WHERE
-          f.follower_id=$1
-          AND f.following_id=u.id
-      ) AS is_following
-
-    FROM users u
-
-   // ============================================================
-// SECTION 25
-// ADVANCED SEARCH & DISCOVERY
-// GLOBAL SEARCH / USERS / POSTS / REELS / HASHTAGS
-// SEARCH HISTORY / TRENDING / SUGGESTIONS
-// ============================================================
-
-
-// ------------------------------------------------------------
-// SEARCH TABLES
-// ------------------------------------------------------------
-
+/* EXTRA FEATURE SECTION 25 */
 await pool.query(`
   CREATE TABLE IF NOT EXISTS search_history (
     id SERIAL PRIMARY KEY,
@@ -20947,11 +18026,12 @@ if (
 
     WHERE
       u.is_active=TRUE
-      AND u.id<>$1
       AND (
-        LOWER(u.name) LIKE LOWER($2)
+        LOWER(u.username)
+          LIKE LOWER($2)
         OR
-        LOWER(COALESCE(u.username,'')) LIKE LOWER($2)
+        LOWER(u.name)
+          LIKE LOWER($2)
       )
 
     ORDER BY
@@ -20989,13 +18069,15 @@ if (
       AND (
         p.content ILIKE $1
         OR
-        COALESCE(p.location,'') ILIKE $1
+        u.username ILIKE $1
+        OR
+        u.name ILIKE $1
       )
 
     ORDER BY
       p.created_at DESC
 
-    LIMIT 30
+    LIMIT 20
   `,[
     `%${q}%`
   ]);
@@ -21024,13 +18106,15 @@ if (
       AND (
         r.caption ILIKE $1
         OR
-        COALESCE(r.location,'') ILIKE $1
+        u.username ILIKE $1
+        OR
+        u.name ILIKE $1
       )
 
     ORDER BY
       r.created_at DESC
 
-    LIMIT 30
+    LIMIT 20
   `,[
     `%${q}%`
   ]);
@@ -21038,21 +18122,7 @@ if (
   const hashtags = await pool.query(`
     SELECT
       h.id,
-      h.tag,
-      h.created_at,
-
-      (
-        SELECT COUNT(*)::INTEGER
-        FROM hashtag_posts hp
-        WHERE hp.hashtag_id=h.id
-      )
-      +
-      (
-        SELECT COUNT(*)::INTEGER
-        FROM hashtag_reels hr
-        WHERE hr.hashtag_id=h.id
-      )
-      AS usage_count
+      h.tag
 
     FROM hashtags h
 
@@ -21060,7 +18130,6 @@ if (
       h.tag ILIKE $1
 
     ORDER BY
-      usage_count DESC,
       h.id DESC
 
     LIMIT 20
@@ -21494,9 +18563,7 @@ if (
     FROM posts p
 
     JOIN users u
-      ON u.id=p.user_id
-
-    WHERE
+      ON u.id=p.user_id    WHERE
       p.archived=FALSE
       AND u.is_active=TRUE
       AND p.user_id<>$1
@@ -21625,17 +18692,9 @@ if (
   });
 
   return;
-}// ============================================================
-// SECTION 26
-// ADVANCED SECURITY / SESSION & DEVICE MANAGEMENT
-// LOGIN PROTECTION / ACCOUNT SECURITY / PASSWORD RESET
-// ============================================================
+}
 
-
-// ------------------------------------------------------------
-// SECURITY TABLES
-// ------------------------------------------------------------
-
+/* EXTRA FEATURE SECTION 26 */
 await pool.query(`
   CREATE TABLE IF NOT EXISTS user_devices (
     id SERIAL PRIMARY KEY,
@@ -22367,41 +19426,7 @@ if (
   return;
 }
 
-
-// ------------------------------------------------------------
-// CLEAN EXPIRED RESET TOKENS
-// ------------------------------------------------------------
-
-if (
-  req.method === "POST" &&
-  path === "/api/security/cleanup"
-) {
-
-  const result = await pool.query(`
-    DELETE FROM password_reset_tokens
-
-    WHERE
-      expires_at<NOW()
-      OR used=TRUE
-  `);
-
-  sendJson(res,{
-    ok:true,
-    deleted:result.rowCount
-  });
-
-  return;
-  }// ============================================================
-// SECTION 27
-// ADVANCED CONTENT SAFETY / MODERATION / USER CONTROLS
-// HIDDEN CONTENT / KEYWORDS / PERSONALIZED CONTENT SETTINGS
-// ============================================================
-
-
-// ------------------------------------------------------------
-// CONTENT CONTROL TABLES
-// ------------------------------------------------------------
-
+/* EXTRA FEATURE SECTION 27 */
 await pool.query(`
   CREATE TABLE IF NOT EXISTS hidden_posts (
     id SERIAL PRIMARY KEY,
@@ -22539,6 +19564,251 @@ if (
   ) {
 
     sendJson(res,{
+      ok:false,
+      error:"invalid_post"
+    },400);
+
+    return;
+  }
+
+  await pool.query(`
+    DELETE FROM hidden_posts
+    WHERE
+      user_id=$1
+      AND post_id=$2
+  `,[
+    user.id,
+    postId
+  ]);
+
+  sendJson(res,{
+    ok:true
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// HIDE REEL
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/api/content/hide-reel"
+) {
+
+  const d = await readBody(req);
+
+  const reelId =
+    Number(d.get("reel_id"));
+
+  if (
+    !Number.isInteger(reelId) ||
+    reelId <= 0
+  ) {
+
+    sendJson(res,{
+      ok:false,
+      error:"invalid_reel"
+    },400);
+
+    return;
+  }
+
+  await pool.query(`
+    INSERT INTO hidden_reels(
+      user_id,
+      reel_id
+    )
+    VALUES($1,$2)
+
+    ON CONFLICT(user_id,reel_id)
+    DO NOTHING
+  `,[
+    user.id,
+    reelId
+  ]);
+
+  sendJson(res,{
+    ok:true
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// UNHIDE REEL
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/api/content/unhide-reel"
+) {
+
+  const d = await readBody(req);
+
+  const reelId =
+    Number(d.get("reel_id"));
+
+  if (
+    !Number.isInteger(reelId) ||
+    reelId <= 0
+  ) {
+
+    sendJson(res,{
+      ok:false,
+      error:"invalid_reel"
+    },400);
+
+    return;
+  }
+
+  await pool.query(`
+    DELETE FROM hidden_reels
+    WHERE
+      user_id=$1
+      AND reel_id=$2
+  `,[
+    user.id,
+    reelId
+  ]);
+
+  sendJson(res,{
+    ok:true
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// BLOCKED KEYWORDS API
+// ------------------------------------------------------------
+
+if (
+  req.method === "GET" &&
+  path === "/api/content/blocked-keywords"
+) {
+
+  const result = await pool.query(`
+    SELECT
+      id,
+      keyword,
+      created_at
+
+    FROM blocked_keywords
+
+    WHERE user_id=$1
+
+    ORDER BY
+      created_at DESC
+
+    LIMIT 200
+  `,[user.id]);
+
+  sendJson(res,{
+    ok:true,
+    keywords:result.rows
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// ADD BLOCKED KEYWORD
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/api/content/blocked-keyword"
+) {
+
+  const d = await readBody(req);
+
+  const keyword =
+    (d.get("keyword") || "")
+      .trim()
+      .toLowerCase()
+      .slice(0,100);
+
+  if (!keyword) {
+
+    sendJson(res,{
+      ok:false,
+      error:"keyword_required"
+    },400);
+
+    return;
+  }
+
+  await pool.query(`
+    INSERT INTO blocked_keywords(
+      user_id,
+      keyword
+    )
+    VALUES($1,$2)
+
+    ON CONFLICT(user_id,keyword)
+    DO NOTHING
+  `,[
+    user.id,
+    keyword
+  ]);
+
+  sendJson(res,{
+    ok:true
+  });
+
+  return;
+}
+
+
+// ------------------------------------------------------------
+// REMOVE BLOCKED KEYWORD
+// ------------------------------------------------------------
+
+if (
+  req.method === "POST" &&
+  path === "/api/content/blocked-keyword/delete"
+) {
+
+  const d = await readBody(req);
+
+  const keyword =
+    (d.get("keyword") || "")
+      .trim()
+      .toLowerCase()
+      .slice(0,100);
+
+  if (!keyword) {
+
+    sendJson(res,{
+      ok:false,
+      error:"keyword_required"
+    },400);
+
+    return;
+  }
+
+  await pool.query(`
+    DELETE FROM blocked_keywords
+    WHERE
+      user_id=$1
+      AND keyword=$2
+  `,[
+    user.id,
+    keyword
+  ]);
+
+  sendJson(res,{
+    ok:true
+  });
+
+  return;
+}    sendJson(res,{
       ok:false,
       error:"invalid_post"
     },400);
@@ -23536,11 +20806,10 @@ await pool.query(`
     call_id INTEGER NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
     sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    type TEXT NOT NULL,
-    payload TEXT DEFAULT '',
-    consumed BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )
+    type TEXT NOT NULL,  payload TEXT DEFAULT '',
+  consumed BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
 `);
 
 await pool.query(`
@@ -23886,204 +21155,107 @@ async function createAdvancedNotification(
     live: p?.live !== false,
     payment: p?.payments !== false,
     security: p?.security !== false,
-    marketing: p?.marketing === true
+    marketing: p?.marketing !== false
   };
 
   if (allowed[type] === false) return;
 
-  await pool.query(`
-    INSERT INTO notifications(
-      user_id,actor_id,type,message,entity_type,entity_id
-    )
-    VALUES($1,$2,$3,$4,$5,$6)
-  `, [
-    userId,
-    actorId || null,
-    type,
-    message,
-    entityType,
-    entityId
-  ]);
-}
-
-function requireAdmin(user) {
-  return user &&
-    ["admin", "superadmin"].includes(String(user.role || "").toLowerCase());
-}
-
-
-/* =========================================================
-   ADVANCED API
-   ========================================================= */
-
-if (path === "/api/account" && req.method === "GET") {
-  sendJson(res, 200, {
-    success: true,
-    user: {
-      id: user.id,
-      name: user.name,
-      email: user.email
-    }
-  });
-  return;
-}
-
-
-if (path === "/api/profile" && req.method === "GET") {
-  const id = Number(url.searchParams.get("id") || user.id);
-
-  const r = await pool.query(`
-    SELECT
-      u.id,
-      u.name,
-      u.email,
-      COALESCE(u.bio,'') bio,
-      u.avatar_url,
-      u.website,
-      u.location,
-      COALESCE(u.profile_public,TRUE) profile_public,
-      COALESCE(u.is_verified,FALSE) is_verified,
-      (SELECT COUNT(*) FROM follows f WHERE f.following_id=u.id)::int followers,
-      (SELECT COUNT(*) FROM follows f WHERE f.follower_id=u.id)::int following,
-      (SELECT COUNT(*) FROM posts p WHERE p.user_id=u.id AND p.archived=FALSE)::int posts
-    FROM users u
-    WHERE u.id=$1
-  `, [id]);
-
-  if (!r.rows.length) {
-    sendJson(res, 404, { success:false, error:"کاربر پیدا نشد." });
-    return;
-  }
-
-  const p = r.rows[0];
-
-  if (id !== user.id) {
+  try {
     await pool.query(`
-      INSERT INTO profile_visits(profile_id,visitor_id)
-      VALUES($1,$2)
-    `, [id,user.id]);
+      INSERT INTO notifications(
+        user_id,
+        actor_id,
+        type,
+        message,
+        entity_type,
+        entity_id,
+        is_read,
+        created_at
+      )
+      VALUES(
+        $1,$2,$3,$4,$5,$6,FALSE,NOW()
+      )
+    `,[
+      userId,
+      actorId || null,
+      type,
+      message,
+      entityType,
+      entityId
+    ]);
+  } catch (e) {
+    try {
+      await pool.query(`
+        INSERT INTO notifications(
+          user_id,
+          actor_id,
+          type,
+          message,
+          is_read,
+          created_at
+        )
+        VALUES(
+          $1,$2,$3,$4,FALSE,NOW()
+        )
+      `,[
+        userId,
+        actorId || null,
+        type,
+        message
+      ]);
+    } catch {}
   }
-
-  sendJson(res, 200, { success:true, profile:p });
-  return;
 }
 
 
-if (path === "/api/profile/update" && req.method === "POST") {
-  const d = await readBody(req);
-
-  const name = String(d.get("name") || "").trim();
-  const bio = String(d.get("bio") || "").trim();
-  const website = String(d.get("website") || "").trim();
-  const location = String(d.get("location") || "").trim();
-
-  if (!name || name.length > 100) {
-    sendJson(res,400,{success:false,error:"نام نامعتبر است."});
-    return;
-  }
-
-  if (website && !validHttpUrl(website)) {
-    sendJson(res,400,{success:false,error:"لینک سایت نامعتبر است."});
-    return;
-  }
-
-  await pool.query(`
-    UPDATE users
-    SET name=$1,bio=$2,website=$3,location=$4
-    WHERE id=$5
-  `, [name,bio,website || null,location || null,user.id]);
-
-  sendJson(res,200,{success:true});
-  return;
-}
-
-
-if (path === "/api/profile/social-link" && req.method === "POST") {
-  const d = await readBody(req);
-  const platform = String(d.get("platform") || "").trim().slice(0,50);
-  const link = String(d.get("url") || "").trim();
-
-  if (!platform || !validHttpUrl(link)) {
-    sendJson(res,400,{success:false,error:"اطلاعات لینک نامعتبر است."});
-    return;
-  }
-
-  await pool.query(`
-    INSERT INTO social_links(user_id,platform,url)
-    VALUES($1,$2,$3)
-    ON CONFLICT(user_id,platform)
-    DO UPDATE SET url=EXCLUDED.url
-  `,[user.id,platform,link]);
-
-  sendJson(res,200,{success:true});
-  return;
-}
-
-
-if (path === "/api/profile/social-links" && req.method === "GET") {
-  const r = await pool.query(`
-    SELECT platform,url
-    FROM social_links
-    WHERE user_id=$1
-    ORDER BY platform
-  `,[user.id]);
-
-  sendJson(res,200,{success:true,links:r.rows});
-  return;
-}
-
-
-if (path === "/api/username/check" && req.method === "GET") {
-  const username = String(url.searchParams.get("username") || "")
-    .trim()
-    .toLowerCase();
-
-  if (!/^[a-zA-Z0-9_.]{3,30}$/.test(username)) {
-    sendJson(res,200,{available:false});
-    return;
-  }
-
-  const r = await pool.query(`
-    SELECT id
-    FROM users
-    WHERE LOWER(COALESCE(username,''))=$1
-      AND id<>$2
-    LIMIT 1
-  `,[username,user.id]);
-
-  sendJson(res,200,{available:!r.rows.length});
-  return;
-}
-
-
-/* ---------- Notifications ---------- */
-
-if (path === "/api/notifications/count" && req.method === "GET") {
-  const r = await pool.query(`
-    SELECT COUNT(*)::int count
-    FROM notifications
-    WHERE user_id=$1 AND is_read=FALSE
-  `,[user.id]);
-
-  sendJson(res,200,{success:true,count:r.rows[0].count});
-  return;
-}
-
+/* ---------- Notification APIs ---------- */
 
 if (path === "/api/notifications" && req.method === "GET") {
+  const limit = Math.min(
+    100,
+    Math.max(
+      1,
+      Number(url.searchParams.get("limit")) || 50
+    )
+  );
+
   const r = await pool.query(`
     SELECT
-      n.id,n.type,n.message,n.entity_type,n.entity_id,
-      n.is_read,n.created_at,
-      u.name actor_name
+      n.*,
+      u.name AS actor_name,
+      u.email AS actor_email,
+      u.avatar_url AS actor_avatar
     FROM notifications n
-    LEFT JOIN users u ON u.id=n.actor_id
+    LEFT JOIN users u
+      ON u.id=n.actor_id
     WHERE n.user_id=$1
     ORDER BY n.created_at DESC
-    LIMIT 100
+    LIMIT $2
+  `,[user.id,limit]);
+
+  sendJson(res,200,{
+    success:true,
+    notifications:r.rows
+  });
+
+  return;
+}
+
+
+if (path === "/api/notifications/unread" && req.method === "GET") {
+  const r = await pool.query(`
+    SELECT COUNT(*)::INTEGER AS count
+    FROM notifications
+    WHERE
+      user_id=$1
+      AND is_read=FALSE
   `,[user.id]);
 
-  sendJson(res,200,{success:true,notifications:r.rows});
+  sendJson(res,200,{
+    success:true,
+    count:r.rows[0]?.count || 0
+  });
+
   return;
 }
 
@@ -24452,94 +21624,7 @@ if (path === "/api/global-search" && req.method === "GET") {
   `,[user.id,q]);
 
   await pool.query(`
-    INSERT INTO search_trends(query,search_count)
-    VALUES($1,1)
-    ON CONFLICT(query)
-    DO UPDATE SET
-      search_count=search_trends.search_count+1,
-      updated_at=CURRENT_TIMESTAMP
-  `,[q]);
-
-  const [users,posts,reels] = await Promise.all([
-    pool.query(`
-      SELECT id,name,email,avatar_url
-      FROM users
-      WHERE name ILIKE $1
-         OR email ILIKE $1
-         OR COALESCE(username,'') ILIKE $1
-      ORDER BY id DESC
-      LIMIT 30
-    `,[`%${q}%`]),
-
-    pool.query(`
-      SELECT p.id,p.content,p.image_url,p.created_at,u.name
-      FROM posts p
-      JOIN users u ON u.id=p.user_id
-      WHERE p.content ILIKE $1
-        AND p.archived=FALSE
-      ORDER BY p.created_at DESC
-      LIMIT 50
-    `,[`%${q}%`]),
-
-    pool.query(`
-      SELECT r.id,r.caption,r.media_url,r.created_at,u.name
-      FROM reels r
-      JOIN users u ON u.id=r.user_id
-      WHERE r.caption ILIKE $1
-      ORDER BY r.created_at DESC
-      LIMIT 50
-    `,[`%${q}%`])
-  ]);
-
-  sendJson(res,200,{
-    success:true,
-    users:users.rows,
-    posts:posts.rows,
-    reels:reels.rows
-  });
-  return;
-}
-
-
-if (path === "/api/search-history" && req.method === "GET") {
-  const r = await pool.query(`
-    SELECT id,query,created_at
-    FROM search_history
-    WHERE user_id=$1
-    ORDER BY created_at DESC
-    LIMIT 50
-  `,[user.id]);
-
-  sendJson(res,200,{success:true,history:r.rows});
-  return;
-}
-
-
-if (path === "/api/search-history/clear" && req.method === "POST") {
-  await pool.query(`
-    DELETE FROM search_history
-    WHERE user_id=$1
-  `,[user.id]);
-
-  sendJson(res,200,{success:true});
-  return;
-}
-
-
-if (path === "/api/search-trending" && req.method === "GET") {
-  const r = await pool.query(`
-    SELECT query,search_count
-    FROM search_trends
-    ORDER BY search_count DESC,updated_at DESC
-    LIMIT 20
-  `);
-
-  sendJson(res,200,{success:true,trends:r.rows});
-  return;
-}
-
-
-/* ---------- Content safety ---------- */
+    IN/* ---------- Content safety ---------- */
 
 if (path === "/api/content/hide-post" && req.method === "POST") {
   const d = await readBody(req);
@@ -25324,63 +22409,6 @@ if (path === "/api/admin/status" && req.method === "GET") {
   return;
 }
 
-
-if (path === "/api/admin/users" && req.method === "GET") {
-  if (!requireAdmin(user)) {
-    sendJson(res,403,{success:false,error:"دسترسی غیرمجاز."});
-    return;
-  }
-
-  const r = await pool.query(`
-    SELECT
-      id,name,email,
-      COALESCE(role,'user') role,
-      COALESCE(status,'active') status
-    FROM users
-    ORDER BY id DESC
-    LIMIT 500
-  `);
-
-  sendJson(res,200,{success:true,users:r.rows});
-  return;
-}
-
-
-if (path === "/api/admin/user/status" && req.method === "POST") {
-  if (!requireAdmin(user)) {
-    sendJson(res,403,{success:false,error:"دسترسی غیرمجاز."});
-    return;
-  }
-
-  const d = await readBody(req);
-  const targetId = Number(d.get("user_id"));
-  const status = ["active","suspended","disabled"].includes(
-    String(d.get("status"))
-  )
-    ? String(d.get("status"))
-    : "active";
-
-  if (!isSafeInteger(targetId) || targetId === user.id) {
-    sendJson(res,400,{success:false});
-    return;
-  }
-
-  await pool.query(`
-    UPDATE users
-    SET status=$1
-    WHERE id=$2
-  `,[status,targetId]);
-
-  await pool.query(`
-    DELETE FROM sessions
-    WHERE user_id=$1
-  `,[targetId]);
-
-  sendJson(res,200,{success:true});
-  return;
-}
-
-
 if (path === "/api/admin/user/role" && req.method === "POST") {
   if (!requireAdmin(user)) {
     sendJson(res,403,{success:false,error:"دسترسی غیرمجاز."});
@@ -25417,414 +22445,27 @@ if (path === "/api/admin/user/role" && req.method === "POST") {
   sendJson(res,200,{success:true});
   return;
 }
-
-
-if (path === "/api/admin/reports" && req.method === "GET") {
-  if (!requireAdmin(user)) {
-    sendJson(res,403,{success:false});
-    return;
-  }
-
-  const r = await pool.query(`
-    SELECT
-      r.*,
-      u.name reporter_name,
-      ru.name reported_name
-    FROM reports r
-    JOIN users u ON u.id=r.reporter_id
-    LEFT JOIN users ru ON ru.id=r.reported_user_id
-    ORDER BY r.created_at DESC
-    LIMIT 300
-  `);
-
-  sendJson(res,200,{success:true,reports:r.rows});
-  return;
-}
-
-
+ 
+ 
 /* ---------- Security ---------- */
 
-if (path === "/api/security/status" && req.method === "GET") {
-  const sessions = await pool.query(`
-    SELECT COUNT(*)::int count
-    FROM sessions
-    WHERE user_id=$1
-  `,[user.id]);
+if (path === "/api/admin/reports" && req.method === "GET") {
 
-  const devices = await pool.query(`
-    SELECT COUNT(*)::int count
-    FROM user_devices
-    WHERE user_id=$1
-  `,[user.id]);
-
-  sendJson(res,200,{
-    success:true,
-    sessions:sessions.rows[0].count,
-    devices:devices.rows[0].count
-  });
-  return;
-}
-
-
-if (path === "/api/security/sessions" && req.method === "GET") {
-  const r = await pool.query(`
-    SELECT
-      session_id,
-      created_at
-    FROM sessions
-    WHERE user_id=$1
-    ORDER BY created_at DESC
-  `,[user.id]);
-
-  sendJson(res,200,{success:true,sessions:r.rows});
-  return;
-}
-
-
-if (path === "/api/security/session/revoke" && req.method === "POST") {
-  const d = await readBody(req);
-  const sessionId = String(d.get("session_id") || "");
-
-  if (sessionId) {
-    await pool.query(`
-      DELETE FROM sessions
-      WHERE session_id=$1 AND user_id=$2
-    `,[sessionId,user.id]);
-  }
-
-  sendJson(res,200,{success:true});
-  return;
-}
-
-
-if (path === "/api/security/sessions/revoke-all" && req.method === "POST") {
-  const current = parseCookies(req).sessionId;
-
-  await pool.query(`
-    DELETE FROM sessions
-    WHERE user_id=$1 AND session_id<>$2
-  `,[user.id,current || ""]);
-
-  sendJson(res,200,{success:true});
-  return;
-}
-
-
-if (path === "/api/security/devices" && req.method === "GET") {
-  const r = await pool.query(`
-    SELECT id,device_name,ip,user_agent,last_seen,created_at
-    FROM user_devices
-    WHERE user_id=$1
-    ORDER BY last_seen DESC
-    LIMIT 100
-  `,[user.id]);
-
-  sendJson(res,200,{success:true,devices:r.rows});
-  return;
-}
-
-
-if (path === "/api/security/device/revoke" && req.method === "POST") {
-  const d = await readBody(req);
-  const id = Number(d.get("id"));
-
-  if (isSafeInteger(id)) {
-    await pool.query(`
-      DELETE FROM user_devices
-      WHERE id=$1 AND user_id=$2
-    `,[id,user.id]);
-  }
-
-  sendJson(res,200,{success:true});
-  return;
-}
-
-
-/* ---------- Password reset, transaction-safe ---------- */
-
-if (path === "/api/security/password-reset/confirm" && req.method === "POST") {
-  const d = await readBody(req);
-
-  const token = String(d.get("token") || "").trim();
-  const newPassword = String(d.get("password") || "");
-
-  if (!token || newPassword.length < 6) {
-    sendJson(res,400,{
-      success:false,
-      error:"توکن یا رمز جدید نامعتبر است."
-    });
-    return;
-  }
-
-  const tokenHash = crypto
-    .createHash("sha256")
-    .update(token)
-    .digest("hex");
-
-  const client = await pool.connect();
-
-  try {
-    await client.query("BEGIN");
-
-    const r = await client.query(`
-      SELECT user_id
-      FROM password_reset_tokens
-      WHERE token_hash=$1
-        AND used=FALSE
-        AND expires_at>CURRENT_TIMESTAMP
-      FOR UPDATE
-    `,[tokenHash]);
-
-    if (!r.rows.length) {
-      await client.query("ROLLBACK");
-
-      sendJson(res,400,{
-        success:false,
-        error:"توکن نامعتبر یا منقضی شده است."
-      });
-      return;
-    }
-
-    const userId = r.rows[0].user_id;
-
-    await client.query(`
-      UPDATE users
-      SET password=$1
-      WHERE id=$2
-    `,[hashPassword(newPassword),userId]);
-
-    await client.query(`
-      UPDATE password_reset_tokens
-      SET used=TRUE
-      WHERE token_hash=$1
-    `,[tokenHash]);
-
-    await client.query(`
-      DELETE FROM sessions
-      WHERE user_id=$1
-    `,[userId]);
-
-    await client.query("COMMIT");
-
-    sendJson(res,200,{success:true});
-    return;
-
-  } catch (e) {
-    try { await client.query("ROLLBACK"); } catch {}
-
-    console.error("PASSWORD RESET ERROR:",e);
-
-    sendJson(res,500,{
-      success:false,
-      error:"خطا در تغییر رمز عبور."
-    });
-    return;
-
-  } finally {
-    client.release();
-  }
-}
-
-
-/* ---------- Reports ---------- */
-
-if (path === "/api/content/report-user" && req.method === "POST") {
-  const d = await readBody(req);
-
-  const targetId = Number(d.get("user_id"));
-  const reason = String(d.get("reason") || "گزارش کاربر")
-    .trim()
-    .slice(0,500);
-
-  if (
-    !isSafeInteger(targetId) ||
-    targetId === user.id
-  ) {
-    sendJson(res,400,{success:false});
-    return;
-  }
-
-  await pool.query(`
-    INSERT INTO reports(
-      reporter_id,
-      reported_user_id,
-      reason
-    )
-    VALUES($1,$2,$3)
-  `,[user.id,targetId,reason]);
-
-  await createAdvancedNotification(
-    targetId,
-    user.id,
-    "security",
-    "یک گزارش درباره حساب شما ثبت شد.",
-    "report",
-    null
-  );
-
-  sendJson(res,200,{success:true});
-  return;
-}
-
-
-/* ---------- Logout API ---------- */
-
-if (path === "/api/logout" && req.method === "POST") {
-  const sid = parseCookies(req).sessionId;
-
-  if (sid) {
-    await pool.query(`
-      DELETE FROM sessions
-      WHERE session_id=$1
-    `,[sid]);
-  }
-
-  sendJson(res,200,{success:true});
-  return;
-}
-
-
-/* ---------- System cleanup ---------- */
-
-if (path === "/api/system/cleanup" && req.method === "POST") {
-  if (!requireAdmin(user)) {
     sendJson(res,403,{success:false,error:"دسترسی غیرمجاز."});
     return;
-  }
-
-  const result = {};
-
-  const stories = await pool.query(`
-    DELETE FROM stories
-    WHERE expires_at<CURRENT_TIMESTAMP
-  `);
-
-  result.stories = stories.rowCount;
-
-  const tokens = await pool.query(`
-    DELETE FROM password_reset_tokens
-    WHERE expires_at<CURRENT_TIMESTAMP OR used=TRUE
-  `);
-
-  result.password_tokens = tokens.rowCount;
-
-  const notifications = await pool.query(`
-    DELETE FROM notifications
-    WHERE created_at<CURRENT_TIMESTAMP-INTERVAL '180 days'
-  `);
-
-  result.notifications = notifications.rowCount;
-
-  const signals = await pool.query(`
-    DELETE FROM call_signals
-    WHERE created_at<CURRENT_TIMESTAMP-INTERVAL '1 day'
-  `);
-
-  result.call_signals = signals.rowCount;
-
-  const loginAttempts = await pool.query(`
-    DELETE FROM login_attempts
-    WHERE created_at<CURRENT_TIMESTAMP-INTERVAL '90 days'
-  `);
-
-  result.login_attempts = loginAttempts.rowCount;
-
-  sendJson(res,200,{success:true,result});
-  return;
-}
-
-
-/* =========================================================
-   FINAL 404
-   ========================================================= */
-
-sendJson(res,404,{
-  success:false,
-  error:"مسیر مورد نظر پیدا نشد."
-});
-return;
-
-} catch (error) {
-
-  console.error("SERVER ERROR:", error);
-
-  if (!res.headersSent) {
-    sendJson(res,500,{
-      success:false,
-      error:"خطای داخلی سرور."
-    });
-  }
-
-  return;
-}
-});
-
-
-/* =========================================================
-   SERVER STARTUP
-   ========================================================= */
+   )
+    ? String(d.get("role"))
+    : "user";
 
 async function startServer() {
   try {
     await createTables();
-
-    await pool.query(`
-      UPDATE users
-      SET status='active'
-      WHERE status IS NULL
-    `).catch(() => {});
-
-    await pool.query(`
-      INSERT INTO badges(name,description,icon)
-      VALUES
-        ('First Post','اولین پست','🏅'),
-        ('Active User','کاربر فعال','⭐'),
-        ('Creator','سازنده محتوا','🎨')
-      ON CONFLICT(name) DO NOTHING
-    `).catch(() => {});
-
-    await pool.query(`
-      INSERT INTO rewards(name,description,points_required,active)
-      VALUES
-        ('Starter','جایزه شروع فعالیت',10,TRUE),
-        ('Active Creator','جایزه سازنده فعال',100,TRUE),
-        ('Super Creator','جایزه سازنده برتر',500,TRUE)
-      ON CONFLICT DO NOTHING
-    `).catch(() => {});
-
-    await pool.query(`
-      UPDATE user_subscriptions
-      SET status='expired'
-      WHERE status='active'
-        AND expires_at<=CURRENT_TIMESTAMP
-    `).catch(() => {});
-
-    await pool.query(`
-      DELETE FROM stories
-      WHERE expires_at<CURRENT_TIMESTAMP
-    `).catch(() => {});
-
-    await pool.query(`
-      DELETE FROM password_reset_tokens
-      WHERE expires_at<CURRENT_TIMESTAMP OR used=TRUE
-    `).catch(() => {});
-
-    server.listen(
-      PORT,
-      "0.0.0.0",
-      () => {
-        console.log("=================================");
-        console.log("MySocial server is running.");
-        console.log("PORT:",PORT);
-        console.log("Database: connected");
-        console.log("=================================");
-      }
-    );
-
-  } catch (error) {
+    server.listen(PORT,"0.0.0.0",()=>console.log(`Server running on port ${PORT}`));
+  } catch(error) {
     console.error("STARTUP ERROR:",error);
     process.exit(1);
   }
 }
 
 startServer();
+
