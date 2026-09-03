@@ -676,11 +676,11 @@ function sendJson(res,statusOrData,dataMaybe){const status=typeof statusOrData==
 function sendPage(res,title,content,user=null){return sendHtml(res,200,title,content,user);}
 function isSafeInteger(v){return Number.isInteger(Number(v))&&Number(v)>0;}
 function validHttpUrl(v){try{const u=new URL(String(v));return u.protocol==="http:"||u.protocol==="https:";}catch{return false;}}
-async function ensureNotificationPreferences(userId){try{await pool.query(`INSERT INTO notification_preferences(userId) VALUES($1) ON CONFLICT(userId) DO NOTHING`,[userId]);}catch{}}         `,[creatorId,amount]);
+async function ensureNotificationPreferences(userId){try{await pool.query(`INSERT INTO notification_preferences(userId) VALUES($1) ON CONFLICT(userId) DO NOTHING`,[userId]);}catch{}}       
 
       redirect(res,"/creator-payouts");
       return;
-    }
+}
 
     // ------------------------------------------------------------
     // SUBSCRIPTION PLANS
