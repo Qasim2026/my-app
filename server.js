@@ -679,8 +679,8 @@ function validHttpUrl(v){try{const u=new URL(String(v));return u.protocol==="htt
 async function ensureNotificationPreferences(userId){try{await pool.query(`INSERT INTO notification_preferences(userId) VALUES($1) ON CONFLICT(userId) DO NOTHING`,[userId]);}catch{}}       
 
       redirect(res,"/creator-payouts");
-      return;
-
+    return;
+}
     // ------------------------------------------------------------
     // SUBSCRIPTION PLANS
     // ------------------------------------------------------------
