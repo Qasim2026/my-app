@@ -680,7 +680,6 @@ async function ensureNotificationPreferences(userId){try{await pool.query(`INSER
 
       redirect(res,"/creator-payouts");
     return;
-}
     // ------------------------------------------------------------
     // SUBSCRIPTION PLANS
     // ------------------------------------------------------------
