@@ -2242,50 +2242,42 @@ if (req.method === "GET" && path === "/ads") {
         ORDER BY event_type
       `,[adId]);
 
-      const rows = events.rows.map(e => `
-        <tr>
-          <td>${escapeHtml(e.event_type)}</td>
-          <td>${e.count}</td>
-        </tr>
-      `).join("");
+      if (req.method === "POST" && path === "/creator-enable") {
+  const d = await readBody(req);
 
-      sendPage(
-        res,
-        "آمار تبلیغ",
-        `
-        <div class="card">
-          <h2>📊 ${escapeHtml(
-            ad.rows[0].title
-          )}</h2>
+  const displayName =
+    (d.get("display_name") || "").trim();
 
-          <p>
-            بودجه:
-            ${Number(ad.rows[0].budget || 0)
-              .toLocaleString("fa-IR")}
-          </p>
+  const bio =
+    (d.get("bio") || "").trim();
 
-          <p>
-            هزینه:
-            ${Number(ad.rows[0].spent || 0)
-              .toLocaleString("fa-IR")}
-          </p>
+  if (!displayName) {
+    redirect(res,"/creator");
+    return;
+  }
 
-          <p>
-            وضعیت:
-            ${escapeHtml(ad.rows[0].status || "")}
-          </p>
-        </div>
+  await pool.query(`
+    INSERT INTO creator_accounts(
+      user_id,
+      display_name,
+      bio,
+      status
+    )
+    VALUES($1,$2,$3,'active')
+    ON CONFLICT(user_id)
+    DO UPDATE SET
+      display_name=EXCLUDED.display_name,
+      bio=EXCLUDED.bio,
+      status='active'
+  `,[
+    user.id,
+    displayName.slice(0,100),
+    bio.slice(0,1000)
+  ]);
 
-        <div class="card">
-          <h3>رویدادها</h3>
-
-          <table>
-            <thead>
-              <tr>
-                <th>نوع</th>
-                <th>تعداد</th>
-              </tr>
-            </thead>
+  redirect(res,"/creator");
+  return;
+                   }
 
             <tbody>
               ${rows || `
