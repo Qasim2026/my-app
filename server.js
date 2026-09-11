@@ -2081,42 +2081,6 @@ if (req.method === "GET" && path === "/ads") {
           <div class="card">
             هنوز تبلیغی ایجاد نکرده‌اید.
           </div>
-        `}
-        `
-      );
-      return;
-    }
-
-    if (req.method === "POST" && path === "/ad-create") {
-      const d = await readBody(req);
-
-      const title =
-        (d.get("title") || "").trim();
-
-      const description =
-        (d.get("description") || "").trim();
-
-      const targetUrl =
-        (d.get("target_url") || "").trim();
-
-      const budget =
-        Number(d.get("budget") || 0);
-
-      if (
-        !title ||
-        !targetUrl ||
-        !Number.isFinite(budget) ||
-        budget < 0
-      ) {
-        redirect(res,"/ads");
-        return;
-      }
-
-      let parsedUrl;
-
-      try {
-        parsedUrl = new URL(targetUrl);
-      } catch {
         redirect(res,"/ads");
         return;
       }
@@ -2271,52 +2235,42 @@ if (req.method === "GET" && path === "/ads") {
       status='active'
   `,[
     user.id,
+    displayName.slice(0,100),if (req.method === "POST" && path === "/creator-enable") {
+  const d = await readBody(req);
+
+  const displayName =
+    (d.get("display_name") || "").trim();
+
+  const bio =
+    (d.get("bio") || "").trim();
+
+  if (!displayName) {
+    redirect(res,"/creator");
+    return;
+  }
+
+  await pool.query(`
+    INSERT INTO creator_accounts(
+      user_id,
+      display_name,
+      bio,
+      status
+    )
+    VALUES($1,$2,$3,'active')
+    ON CONFLICT(user_id)
+    DO UPDATE SET
+      display_name=EXCLUDED.display_name,
+      bio=EXCLUDED.bio,
+      status='active'
+  `,[
+    user.id,
     displayName.slice(0,100),
     bio.slice(0,1000)
   ]);
 
   redirect(res,"/creator");
   return;
-                   }
-
-            <tbody>
-              ${rows || `
-                <tr>
-                  <td colspan="2">
-                    هنوز داده‌ای ثبت نشده است.
-                  </td>
-                </tr>
-              `}
-            </tbody>
-          </table>
-        </div>
-        `
-      );
-      return;
-    }
-
-    // ------------------------------------------------------------
-    // CREATOR ACCOUNT
-    // ------------------------------------------------------------
-
-    if (req.method === "GET" && path === "/creator") {
-      const creator = await pool.query(`
-        SELECT
-          ca.id,
-          ca.display_name,
-          ca.bio,
-          ca.status,
-          COALESCE(
-            SUM(
-              CASE
-                WHEN ct.type='earning'
-                THEN ct.amount
-                ELSE 0
-              END
-            ),0
-          ) AS earnings
-        FROM creator_accounts ca
-        LEFT JOIN creator_transactions ct
+}
           ON ct.creator_id=ca.id
         WHERE ca.user_id=$1
         GROUP BY ca.id
